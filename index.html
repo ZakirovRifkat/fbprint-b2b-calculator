@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#181143">
+  <title>FB Print — Расчёт стоимости</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="#top" aria-label="FB-print, на главную">
+      <img src="assets/logo-full.svg" alt="FB-print" width="120" height="95">
+    </a>
+    <div class="header-meta" data-state="demo" aria-busy="false">
+      <span class="sync-dot" aria-hidden="true"></span>
+      <span id="data-status" aria-live="polite">Демо-данные</span>
+      <button class="text-button" id="refresh-data" type="button">Обновить</button>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="intro" aria-labelledby="page-title">
+      <div>
+        <h1 id="page-title">Расчёт стоимости</h1>
+        <p>Выберите компанию и артикул, укажите тираж — система проверит условия производства и подготовит стоимость.</p>
+      </div>
+      <div class="intro-stamp" aria-hidden="true">
+        <span>Расчёт</span>
+        <strong>онлайн</strong>
+      </div>
+    </section>
+
+    <section class="workspace" aria-label="Калькулятор заказа">
+      <div class="builder">
+        <div class="catalog-alert" id="catalog-alert" role="alert" hidden>
+          <strong id="catalog-alert-title"></strong>
+          <p id="catalog-alert-message"></p>
+        </div>
+        <div class="step-block">
+          <div class="step-heading">
+            <span class="step-number">1</span>
+            <div>
+              <h2>Компания-заказчик</h2>
+              <p>Артикулы и условия расчёта зависят от компании.</p>
+            </div>
+          </div>
+          <div class="company-switch" id="company-switch" role="radiogroup" aria-label="Компания-заказчик"></div>
+        </div>
+
+        <div class="step-block">
+          <div class="step-heading">
+            <span class="step-number">2</span>
+            <div>
+              <h2>Артикул</h2>
+              <p>Введите номер или часть наименования этикетки.</p>
+            </div>
+          </div>
+          <div class="search-wrap">
+            <label for="article-search">Поиск по каталогу</label>
+            <div class="search-field">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
+              <input id="article-search" type="search" autocomplete="off" placeholder="Например, 10165 или «грудка»" aria-controls="search-results" aria-expanded="false">
+              <kbd id="search-shortcut">Ctrl K</kbd>
+            </div>
+            <div class="search-results" id="search-results" role="listbox" hidden></div>
+          </div>
+          <article class="product" id="selected-product" hidden>
+            <div class="product-id">
+              <span id="product-company"></span>
+              <strong id="product-sku"></strong>
+            </div>
+            <div class="product-copy">
+              <h3 id="product-name"></h3>
+              <p><span id="product-size"></span><span aria-hidden="true">·</span><span id="product-color"></span></p>
+            </div>
+            <button class="icon-button" id="change-product" type="button" aria-label="Выбрать другой артикул">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+            </button>
+          </article>
+        </div>
+
+        <div class="step-block calculation" id="calculation-block" aria-disabled="true">
+          <div class="step-heading">
+            <span class="step-number">3</span>
+            <div>
+              <h2>Тираж и стоимость</h2>
+              <p>Подскажем оптимальное количество до добавления в заявку.</p>
+            </div>
+          </div>
+
+          <div class="calculation-grid">
+            <div class="controls">
+              <label class="field-label" for="quantity">Количество, шт.</label>
+              <div class="quantity-control">
+                <button type="button" id="quantity-minus" aria-label="Уменьшить количество" disabled>−</button>
+                <input id="quantity" type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" value="4200" aria-describedby="condition" disabled>
+                <button type="button" id="quantity-plus" aria-label="Увеличить количество" disabled>+</button>
+              </div>
+
+              <fieldset class="urgency" disabled>
+                <legend>Срок изготовления</legend>
+                <label><input type="radio" name="urgency" value="standard" checked><span>Стандартный</span></label>
+                <label><input type="radio" name="urgency" value="urgent"><span>Срочный</span></label>
+                <label><input type="radio" name="urgency" value="emergency"><span>Экстренный</span></label>
+              </fieldset>
+
+              <div class="condition" id="condition" data-state="idle" aria-live="polite">
+                <span class="condition-mark" aria-hidden="true"></span>
+                <div>
+                  <strong id="condition-title">Выберите артикул</strong>
+                  <p id="condition-message">После выбора появятся условия тиража.</p>
+                </div>
+                <button id="apply-suggestion" type="button" hidden></button>
+              </div>
+            </div>
+
+            <div class="price-ticket" aria-live="polite">
+              <span>Стоимость позиции</span>
+              <strong id="line-total">—</strong>
+              <p><span id="line-quantity">0 шт.</span><span aria-hidden="true">×</span><span id="unit-price">—</span></p>
+              <dl>
+                <div><dt>Минимальный тираж</dt><dd id="minimum-value">—</dd></div>
+                <div><dt>Кратность</dt><dd id="multiple-value">—</dd></div>
+              </dl>
+              <button class="primary-button" id="add-line" type="button" disabled>Добавить в заявку</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="order" aria-labelledby="order-title">
+        <div class="order-head">
+          <div>
+            <h2 id="order-title">Ваша заявка</h2>
+            <p id="order-counter">Пока нет позиций</p>
+          </div>
+          <button class="icon-button" id="clear-order" type="button" aria-label="Очистить заявку" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16m-10 4v6m4-6v6M9 7l1-3h4l1 3m-9 0 1 14h10l1-14"/></svg>
+          </button>
+        </div>
+
+        <div class="order-empty" id="order-empty">
+          <div class="empty-label" aria-hidden="true"></div>
+          <strong>Здесь появятся выбранные этикетки</strong>
+          <p>Можно добавить несколько артикулов одной компании.</p>
+        </div>
+
+        <div class="order-lines" id="order-lines"></div>
+
+        <div class="order-footer">
+          <div class="order-total"><span>Итого</span><strong id="order-total">0 ₽</strong></div>
+          <button class="secondary-button" id="download-excel" type="button" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/></svg>
+            Скачать Excel
+          </button>
+          <button class="primary-button primary-button--accent" id="submit-order" type="button" disabled>Отправить менеджеру</button>
+          <p class="order-note">Менеджер подтвердит сроки и пришлёт счёт.</p>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <dialog id="contact-dialog">
+    <form method="dialog" id="contact-form">
+      <button class="dialog-close" id="close-contact-dialog" type="button" aria-label="Закрыть">×</button>
+      <h2>Куда отправить расчёт?</h2>
+      <p>Оставьте контакты — менеджер получит состав заявки и свяжется с вами.</p>
+      <p class="dialog-note" id="dialog-demo-note">Демонстрационный режим: данные пока никуда не отправляются.</p>
+      <label>Имя<input name="name" required maxlength="100" autocomplete="name"></label>
+      <label>Телефон<input name="phone" required maxlength="30" inputmode="tel" autocomplete="tel" placeholder="+7 999 000-00-00"></label>
+      <label>Электронная почта<input name="email" type="email" maxlength="254" autocomplete="email"></label>
+      <label class="form-trap" aria-hidden="true">Сайт<input name="website" tabindex="-1" autocomplete="off"></label>
+      <p class="dialog-error" id="contact-error" role="alert" hidden></p>
+      <button class="primary-button primary-button--accent" value="submit">Отправить заявку</button>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <script src="config.js"></script>
+  <script src="assets/vendor/xlsx.mini.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
