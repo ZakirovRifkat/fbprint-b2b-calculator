@@ -376,7 +376,8 @@ function hideSearch() {
 
 function renderSearch(query) {
   const root = $('#search-results');
-  if (!query.trim()) {
+  // Пустой запрос: варианты показываем, только пока поле в фокусе, — иначе список не нужен.
+  if (!query.trim() && document.activeElement !== $('#article-search')) {
     root.innerHTML = '';
     hideSearch();
     return;
@@ -415,7 +416,9 @@ function renderSearch(query) {
   if (matches.length > items.length) {
     const more = document.createElement('div');
     more.className = 'search-more';
-    more.textContent = `Показаны ${items.length} из ${matches.length}. Уточните номер или название.`;
+    more.textContent = query.trim()
+      ? `Показаны ${items.length} из ${matches.length}. Уточните номер или название.`
+      : `Показаны ${items.length} из ${matches.length}. Начните вводить номер или название.`;
     root.append(more);
   }
 
@@ -791,43 +794,87 @@ async function submitOrder() {
   }
 }
 
-// Настоящий .xlsx через SheetJS (assets/vendor/xlsx.mini.min.js).
-function downloadExcel() {
-  const rows = [
-    ['Компания', 'Артикул', 'Наименование', 'Тираж', 'Срочность', 'Цена за шт.', 'Сумма', 'Условия тиража'],
-    ...order.map(line => [
-      line.company,
-      line.sku,
-      line.name,
-      line.quantity,
-      urgencyLabels[line.urgency],
-      line.unitPrice,
-      line.total,
-      conditionLabels[line.status]
-    ])
+// ExcelJS (~950 КБ) грузится только при первой выгрузке, а не вместе со страницей.
+function loadExcelJs() {
+  if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
+  loadExcelJs.promise ??= new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'assets/vendor/exceljs.min.js';
+    script.onload = () => resolve(window.ExcelJS);
+    script.onerror = () => {
+      loadExcelJs.promise = null;
+      script.remove();
+      reject(new Error('Не удалось загрузить модуль Excel'));
+    };
+    document.head.append(script);
+  });
+  return loadExcelJs.promise;
+}
+
+// .xlsx с рамками: компания, артикул, наименование, тираж, цена (стоимость позиции) и строка «Итого».
+async function buildOrderWorkbook() {
+  const ExcelJS = await loadExcelJs();
+  const book = new ExcelJS.Workbook();
+  const sheet = book.addWorksheet('Заявка', { views: [{ state: 'frozen', ySplit: 1 }] });
+  sheet.columns = [
+    { header: 'Компания', key: 'company', width: 16 },
+    { header: 'Артикул', key: 'sku', width: 11 },
+    { header: 'Наименование', key: 'name', width: 60 },
+    { header: 'Тираж', key: 'quantity', width: 12 },
+    { header: 'Цена', key: 'total', width: 16 }
   ];
-  const total = orderTotal();
-  rows.push(['', '', '', '', '', 'Итого', total, '']);
-  rows.push(['', '', '', '', '', 'Доставка', total >= freeDeliveryFrom ? 'бесплатная' : 'платная или самовывоз', '']);
+  order.forEach(line => sheet.addRow({
+    company: line.company,
+    sku: line.sku,
+    name: line.name,
+    quantity: line.quantity,
+    total: line.total
+  }));
+  const lastLine = order.length + 1;
+  const totalRow = sheet.addRow({
+    quantity: 'Итого',
+    total: { formula: `SUM(E2:E${lastLine})`, result: orderTotal() }
+  });
 
-  const sheet = XLSX.utils.aoa_to_sheet(rows);
-  const totalRow = rows.length - 1;
-  sheet[`G${totalRow}`] = { t: 'n', v: total, f: `SUM(G2:G${totalRow - 1})` };
-  for (let row = 2; row <= totalRow; row++) {
-    if (sheet[`D${row}`]) sheet[`D${row}`].z = '#,##0';
-    if (sheet[`F${row}`]?.t === 'n') sheet[`F${row}`].z = '#,##0.00 "₽"';
-    sheet[`G${row}`].z = '#,##0.00 "₽"';
+  const border = { style: 'thin', color: { argb: 'FF9A97AD' } };
+  sheet.eachRow(row => {
+    for (let column = 1; column <= 5; column++) {
+      const cell = row.getCell(column);
+      cell.border = { top: border, left: border, bottom: border, right: border };
+      cell.alignment = { vertical: 'top', wrapText: column === 3 };
+    }
+  });
+  sheet.getRow(1).eachCell(cell => {
+    cell.font = { bold: true };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEDEBF3' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+  });
+  sheet.getColumn('quantity').numFmt = '#,##0';
+  sheet.getColumn('total').numFmt = '#,##0.00 "₽"';
+  totalRow.font = { bold: true };
+  totalRow.getCell('quantity').alignment = { horizontal: 'right' };
+  return book;
+}
+
+async function downloadExcel() {
+  try {
+    const book = await buildOrderWorkbook();
+    const buffer = await book.xlsx.writeBuffer();
+    const today = new Date();
+    const date = [today.getFullYear(), today.getMonth() + 1, today.getDate()]
+      .map(part => String(part).padStart(2, '0'))
+      .join('-');
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    link.download = `fbprint-order-${date}.xlsx`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 0);
+    toast('Excel-файл сформирован.');
+  } catch (error) {
+    toast(`${error.message}. Попробуйте ещё раз.`);
   }
-  sheet['!cols'] = [{ wch: 14 }, { wch: 10 }, { wch: 60 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 34 }];
-
-  const book = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(book, sheet, 'Заявка');
-  const today = new Date();
-  const date = [today.getFullYear(), today.getMonth() + 1, today.getDate()]
-    .map(part => String(part).padStart(2, '0'))
-    .join('-');
-  XLSX.writeFile(book, `fbprint-order-${date}.xlsx`);
-  toast('Excel-файл сформирован.');
 }
 
 function toast(message) {
@@ -841,9 +888,8 @@ function toast(message) {
 }
 
 $('#article-search').addEventListener('input', event => renderSearch(event.target.value));
-$('#article-search').addEventListener('focus', event => {
-  if (event.target.value) renderSearch(event.target.value);
-});
+$('#article-search').addEventListener('focus', event => renderSearch(event.target.value));
+$('#article-search').addEventListener('click', event => renderSearch(event.target.value));
 document.addEventListener('click', event => {
   if (!event.target.closest('.search-wrap')) hideSearch();
 });
