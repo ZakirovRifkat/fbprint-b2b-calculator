@@ -69,6 +69,7 @@ const money = new Intl.NumberFormat('ru-RU', {
 });
 const integer = new Intl.NumberFormat('ru-RU');
 const searchLimit = 6;
+const freeDeliveryFrom = 100000;
 const urgencyLabels = {
   standard: 'Стандартный',
   urgent: 'Срочный',
@@ -76,8 +77,9 @@ const urgencyLabels = {
 };
 const conditionLabels = {
   good: 'Оптимальные условия',
-  warning: 'Требуется корректировка кратности',
-  danger: 'Ниже минимального тиража'
+  multiple: 'Требуется корректировка кратности',
+  reduced: 'Сниженный тираж',
+  'reduced-multiple': 'Сниженный тираж, требуется корректировка кратности'
 };
 
 const emptyCatalog = { schemaVersion: 1, version: '', companies: [], categories: [], articles: [] };
@@ -464,34 +466,115 @@ function quantity() {
   return Math.max(0, Number(String($('#quantity').value).replace(/\D/g, '')) || 0);
 }
 
-function validateQuantity(value, category) {
-  if (value < category.minimumQuantity) {
+// Наименьший тираж по обычной цене: минимум, приведённый к кратности.
+function minimumValid(category) {
+  return Math.ceil(category.minimumQuantity / category.multiple) * category.multiple;
+}
+
+// Три зоны тиража:
+// 1) меньше «Сниженное кол-во от» (или минимума, если сниженного нет) — не принимаем;
+// 2) сниженный тираж — цена «Стоимость сниженного тиража», только стандартный срок,
+//    кратность — шаг «от» (для категории 27: 1 400, 2 800);
+// 3) от минимума — цена по срочности, кратность категории.
+function quote(value, category, urgency) {
+  const reduced = category.reducedRun;
+  const minimum = minimumValid(category);
+  const standard = category.prices.standard;
+  const atMinimum = `${integer.format(minimum)} шт. — ${money.format(roundMoney(minimum * standard))}`;
+
+  if (value < (reduced ? reduced.minQuantity : category.minimumQuantity)
+    || (reduced && value > reduced.maxQuantity && value < category.minimumQuantity)) {
     return {
-      state: 'danger',
-      title: 'Тираж ниже минимального',
-      message: `Для оптимальных условий необходимо увеличить количество до ${integer.format(category.minimumQuantity)} шт.`,
-      suggested: category.minimumQuantity
+      status: 'blocked',
+      tone: 'danger',
+      title: 'Тираж меньше минимального заказа',
+      message: `Минимальный заказ — ${integer.format(reduced && value < reduced.minQuantity ? reduced.minQuantity : minimum)} шт.`,
+      suggested: reduced && value < reduced.minQuantity ? reduced.minQuantity : minimum,
+      canAdd: false,
+      urgency: 'standard',
+      unitPrice: null
     };
   }
+
+  if (value < category.minimumQuantity) {
+    const step = reduced.minQuantity;
+    const base = { urgency: 'standard', unitPrice: reduced.price, canAdd: true, tone: 'warning' };
+    if (value % step !== 0) {
+      const next = Math.ceil(value / step) * step;
+      const suggested = next > reduced.maxQuantity ? minimum : next;
+      return {
+        ...base,
+        status: 'reduced-multiple',
+        title: 'Тираж не соответствует кратности',
+        message: `Сниженный тираж оформляется кратно ${integer.format(step)} шт. Ближайшее допустимое значение — ${integer.format(suggested)} шт.`,
+        suggested
+      };
+    }
+    // Выгода перехода на минимум: сколько штук сверху и сколько это стоит (или экономит).
+    const extra = minimum - value;
+    const difference = roundMoney(minimum * standard - value * reduced.price);
+    return {
+      ...base,
+      status: 'reduced',
+      title: 'Сниженный тираж',
+      message: `При минимальном тираже ${atMinimum}. Срочный и экстренный заказ — от ${integer.format(minimum)} шт.`,
+      benefit: difference > 0
+        ? `На ${integer.format(extra)} шт. больше — всего +${money.format(difference)}`
+        : `На ${integer.format(extra)} шт. больше и на ${money.format(-difference)} дешевле`,
+      suggested: minimum
+    };
+  }
+
+  const base = { urgency, unitPrice: category.prices[urgency], canAdd: true };
   if (value % category.multiple !== 0) {
     const next = Math.ceil(value / category.multiple) * category.multiple;
     return {
-      state: 'warning',
+      ...base,
+      status: 'multiple',
+      tone: 'warning',
       title: 'Тираж не соответствует кратности',
       message: `Для оптимальных условий необходимо привести количество к кратному ${integer.format(category.multiple)}. Ближайшее допустимое значение — ${integer.format(next)} шт.`,
       suggested: next
     };
   }
   return {
-    state: 'good',
+    ...base,
+    status: 'good',
+    tone: 'good',
     title: 'Соответствует оптимальным условиям',
     message: `Тираж не ниже минимума и кратен ${integer.format(category.multiple)}.`,
     suggested: null
   };
 }
 
+// Шаг кнопок «−» и «+»: в сниженном тираже — по «от», дальше — по кратности категории.
+function stepQuantity(value, category, direction) {
+  const reduced = category.reducedRun;
+  const minimum = minimumValid(category);
+  if (direction > 0) {
+    if (reduced && value < category.minimumQuantity) {
+      const next = (Math.floor(value / reduced.minQuantity) + 1) * reduced.minQuantity;
+      return next > reduced.maxQuantity ? minimum : next;
+    }
+    return Math.max(minimum, (Math.floor(value / category.multiple) + 1) * category.multiple);
+  }
+  if (value > minimum) return Math.max(minimum, (Math.ceil(value / category.multiple) - 1) * category.multiple);
+  if (!reduced) return minimum;
+  const below = Math.min(value, reduced.maxQuantity + 1);
+  return Math.max(reduced.minQuantity, (Math.ceil(below / reduced.minQuantity) - 1) * reduced.minQuantity);
+}
+
 function selectedUrgency() {
   return document.querySelector('[name=urgency]:checked')?.value ?? 'standard';
+}
+
+// Срочный и экстренный заказ — только от минимального тиража.
+function syncUrgency(value, category) {
+  const onlyStandard = value < category.minimumQuantity;
+  document.querySelectorAll('[name=urgency]').forEach(input => {
+    input.disabled = onlyStandard && input.value !== 'standard';
+    if (input.disabled && input.checked) $('[name=urgency][value=standard]').checked = true;
+  });
 }
 
 function renderCalculation() {
@@ -499,6 +582,7 @@ function renderCalculation() {
   const apply = $('#apply-suggestion');
   if (!article) {
     condition.dataset.state = 'idle';
+    $('#condition-benefit').hidden = true;
     $('#condition-title').textContent = 'Выберите артикул';
     $('#condition-message').textContent = 'После выбора появятся условия тиража.';
     apply.hidden = true;
@@ -507,15 +591,18 @@ function renderCalculation() {
     $('#unit-price').textContent = '—';
     $('#minimum-value').textContent = '—';
     $('#multiple-value').textContent = '—';
+    $('#reduced-value').textContent = '—';
     $('#add-line').disabled = true;
     return;
   }
 
   const category = categories().get(article.categoryId);
   const value = quantity();
-  const price = category.prices[selectedUrgency()];
-  const result = validateQuantity(value, category);
-  condition.dataset.state = result.state;
+  syncUrgency(value, category);
+  const result = quote(value, category, selectedUrgency());
+  condition.dataset.state = result.tone;
+  $('#condition-benefit').hidden = !result.benefit;
+  $('#condition-benefit').textContent = result.benefit ?? '';
   $('#condition-title').textContent = result.title;
   $('#condition-message').textContent = result.message;
   apply.hidden = !result.suggested;
@@ -526,12 +613,16 @@ function renderCalculation() {
       renderCalculation();
     };
   }
-  $('#line-total').textContent = money.format(roundMoney(value * price));
+  $('#line-total').textContent = result.canAdd ? money.format(roundMoney(value * result.unitPrice)) : '—';
+  fitText($('#line-total'));
   $('#line-quantity').textContent = `${integer.format(value)} шт.`;
-  $('#unit-price').textContent = money.format(price);
+  $('#unit-price').textContent = result.canAdd ? money.format(result.unitPrice) : '—';
   $('#minimum-value').textContent = integer.format(category.minimumQuantity);
   $('#multiple-value').textContent = integer.format(category.multiple);
-  $('#add-line').disabled = value <= 0;
+  $('#reduced-value').textContent = category.reducedRun
+    ? `${integer.format(category.reducedRun.minQuantity)}–${integer.format(category.reducedRun.maxQuantity)}`
+    : 'нет';
+  $('#add-line').disabled = !result.canAdd;
 }
 
 function createId() {
@@ -542,30 +633,29 @@ function addLine() {
   if (!article) return;
   const category = categories().get(article.categoryId);
   const value = quantity();
-  if (value <= 0) {
-    toast('Укажите количество больше нуля.');
+  const result = quote(value, category, selectedUrgency());
+  if (!result.canAdd) {
+    toast(result.message);
     return;
   }
 
-  const urgency = selectedUrgency();
-  const price = category.prices[urgency];
   const company = data.companies.find(item => item.id === article.companyId);
-  const result = validateQuantity(value, category);
   order.push({
     id: createId(),
     company: company.name,
     sku: article.sku,
     name: article.name,
     quantity: value,
-    urgency,
-    unitPrice: price,
-    total: roundMoney(value * price),
-    status: result.state
+    urgency: result.urgency,
+    unitPrice: result.unitPrice,
+    total: roundMoney(value * result.unitPrice),
+    status: result.status
   });
   renderOrder();
-  toast(result.state === 'good'
-    ? 'Позиция добавлена в заявку.'
-    : 'Позиция добавлена. Проверьте условия тиража.');
+  toast({
+    good: 'Позиция добавлена в заявку.',
+    reduced: 'Позиция добавлена по цене сниженного тиража.'
+  }[result.status] ?? 'Позиция добавлена. Проверьте условия тиража.');
 }
 
 function renderOrder() {
@@ -596,6 +686,11 @@ function renderOrder() {
   });
 
   $('#order-total').textContent = money.format(orderTotal());
+  fitText($('#order-total'));
+  const delivery = $('#delivery-note');
+  delivery.hidden = !order.length;
+  delivery.dataset.free = String(orderTotal() >= freeDeliveryFrom);
+  delivery.textContent = deliveryText();
   $('#order-counter').textContent = order.length
     ? `${order.length} ${plural(order.length, 'позиция', 'позиции', 'позиций')}`
     : 'Пока нет позиций';
@@ -614,8 +709,26 @@ function plural(value, one, few, many) {
       : many;
 }
 
+// Суммы от 100 000 ₽ не помещаются крупным шрифтом: уменьшаем, пока строка не влезет.
+function fitText(element) {
+  element.style.fontSize = '';
+  let size = parseFloat(getComputedStyle(element).fontSize);
+  while (element.scrollWidth > element.clientWidth && size > 16) {
+    size -= 1;
+    element.style.fontSize = `${size}px`;
+  }
+}
+
 function orderTotal() {
   return roundMoney(order.reduce((sum, line) => sum + line.total, 0));
+}
+
+// Правило из примечаний листа «Категории»: «Бесплатная доставка — при сумме счёта от 100 тыс. руб.».
+function deliveryText() {
+  const total = orderTotal();
+  return total >= freeDeliveryFrom
+    ? `Доставка бесплатная от ${money.format(freeDeliveryFrom)}.`
+    : `До бесплатной доставки — ${money.format(roundMoney(freeDeliveryFrom - total))}. Сейчас доставка платная или самовывоз.`;
 }
 
 // Заявка уходит в Apps Script (doPost), а он пересылает её менеджеру в Telegram.
@@ -695,11 +808,12 @@ function downloadExcel() {
   ];
   const total = orderTotal();
   rows.push(['', '', '', '', '', 'Итого', total, '']);
+  rows.push(['', '', '', '', '', 'Доставка', total >= freeDeliveryFrom ? 'бесплатная' : 'платная или самовывоз', '']);
 
   const sheet = XLSX.utils.aoa_to_sheet(rows);
-  const lastRow = rows.length;
-  sheet[`G${lastRow}`] = { t: 'n', v: total, f: `SUM(G2:G${lastRow - 1})` };
-  for (let row = 2; row <= lastRow; row++) {
+  const totalRow = rows.length - 1;
+  sheet[`G${totalRow}`] = { t: 'n', v: total, f: `SUM(G2:G${totalRow - 1})` };
+  for (let row = 2; row <= totalRow; row++) {
     if (sheet[`D${row}`]) sheet[`D${row}`].z = '#,##0';
     if (sheet[`F${row}`]?.t === 'n') sheet[`F${row}`].z = '#,##0.00 "₽"';
     sheet[`G${row}`].z = '#,##0.00 "₽"';
@@ -763,14 +877,12 @@ $('#quantity').addEventListener('blur', () => {
 });
 $('#quantity-minus').addEventListener('click', () => {
   if (!article) return;
-  const category = categories().get(article.categoryId);
-  $('#quantity').value = Math.max(0, quantity() - category.multiple);
+  $('#quantity').value = stepQuantity(quantity(), categories().get(article.categoryId), -1);
   renderCalculation();
 });
 $('#quantity-plus').addEventListener('click', () => {
   if (!article) return;
-  const category = categories().get(article.categoryId);
-  $('#quantity').value = quantity() + category.multiple;
+  $('#quantity').value = stepQuantity(quantity(), categories().get(article.categoryId), 1);
   renderCalculation();
 });
 document.querySelectorAll('[name=urgency]').forEach(input => {
@@ -804,6 +916,10 @@ $('#refresh-data').addEventListener('click', loadData);
 
 const platform = navigator.userAgentData?.platform ?? navigator.platform ?? '';
 $('#search-shortcut').textContent = /mac/i.test(platform) ? '⌘ K' : 'Ctrl K';
+
+const refitTotals = () => ['#line-total', '#order-total'].forEach(selector => fitText($(selector)));
+document.fonts?.ready.then(refitTotals);
+window.addEventListener('resize', refitTotals);
 
 applyCatalog(data);
 loadData();

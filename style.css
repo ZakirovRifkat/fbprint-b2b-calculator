@@ -71,7 +71,11 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .icon-button{width:42px;height:42px;display:grid;place-items:center;border:1px solid var(--line);border-radius:50%;background:#fff;color:var(--ink)}
 .icon-button:hover{border-color:var(--ink)}
 .calculation[aria-disabled=true]{background:#fbfaf7}
+.calculation{container-type:inline-size}
 .calculation-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:30px}
+@container (max-width:640px){.calculation-grid{grid-template-columns:minmax(0,1fr)}
+.price-ticket::before,.price-ticket::after{display:none}
+}
 .quantity-control{height:62px;display:grid;grid-template-columns:54px 1fr 54px;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#fff}
 .quantity-control button{border:0;background:#f1eff7;color:var(--ink);font-size:24px}
 .quantity-control button:hover:not(:disabled){background:#e5e1ef}
@@ -82,11 +86,13 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .urgency input{position:absolute;opacity:0}
 .urgency span{display:block;text-align:center;border:1px solid var(--line);border-radius:10px;padding:11px 6px;background:#fff;font-size:14px}
 .urgency input:checked+span{background:var(--ink);border-color:var(--ink);color:#fff}
+.urgency input:disabled+span{opacity:.45;cursor:not-allowed}
 .urgency input:focus-visible+span{outline:3px solid var(--cyan);outline-offset:3px}
 .condition{margin-top:22px;border-radius:14px;padding:16px;display:grid;grid-template-columns:auto 1fr auto;gap:13px;align-items:center;background:#f0eff4;color:var(--muted)}
 .condition-mark{width:12px;height:12px;border-radius:50%;background:#aaa6bd}
 .condition strong{color:var(--ink)}
 .condition p{margin:3px 0 0;font-size:14px}
+.condition .condition-benefit{display:inline-block;margin-top:9px;padding:5px 10px;border-radius:8px;background:var(--good-bg);color:var(--good);font-weight:700}
 .condition button{border:0;border-radius:9px;padding:10px 12px;background:currentColor}
 .condition button::first-line{color:#fff}
 .condition[data-state=good]{background:var(--good-bg);color:var(--good)}
@@ -100,7 +106,7 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .price-ticket::before{top:82px}
 .price-ticket::after{bottom:82px}
 .price-ticket>span{color:#c9c5e4}
-.price-ticket>strong{display:block;font-family:Unbounded;font-size:38px;margin:14px 0 5px;font-variant-numeric:tabular-nums}
+.price-ticket>strong{display:block;font-family:Unbounded;font-size:38px;margin:14px 0 5px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden}
 .price-ticket>p{display:flex;gap:8px;color:#c9c5e4;margin:0 0 24px}
 .price-ticket dl{border-top:1px dashed #736e97;margin:0;padding:18px 0}
 .price-ticket dl div{display:flex;justify-content:space-between;gap:14px;margin:8px 0}
@@ -128,7 +134,10 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .order-line button{grid-column:1/3;justify-self:start;border:0;background:none;color:#c9c5e4;padding:3px 0;text-decoration:underline;text-underline-offset:3px}
 .order-footer{margin-top:auto;display:grid;gap:10px}
 .order-total{display:flex;justify-content:space-between;align-items:end;margin-bottom:12px}
-.order-total strong{font-family:Unbounded;font-size:29px;font-variant-numeric:tabular-nums}
+.order-total span{flex:0 0 auto}
+.order-total strong{min-width:0;text-align:right;font-family:Unbounded;font-size:29px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden}
+.delivery-note{margin:-6px 0 10px;font-size:13px;color:#b9b5d9}
+.delivery-note[data-free=true]{color:var(--yellow)}
 .order-note{font-size:12px;color:#b9b5d9;text-align:center;margin:3px 0 0}
 dialog{border:0;border-radius:20px;padding:0;max-width:520px;width:calc(100% - 32px);color:var(--ink);box-shadow:0 30px 80px rgba(24,17,67,.3)}
 dialog::backdrop{background:rgba(24,17,67,.68)}

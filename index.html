@@ -110,6 +110,7 @@
                 <div>
                   <strong id="condition-title">Выберите артикул</strong>
                   <p id="condition-message">После выбора появятся условия тиража.</p>
+                  <p class="condition-benefit" id="condition-benefit" hidden></p>
                 </div>
                 <button id="apply-suggestion" type="button" hidden></button>
               </div>
@@ -122,6 +123,7 @@
               <dl>
                 <div><dt>Минимальный тираж</dt><dd id="minimum-value">—</dd></div>
                 <div><dt>Кратность</dt><dd id="multiple-value">—</dd></div>
+                <div><dt>Сниженный тираж</dt><dd id="reduced-value">—</dd></div>
               </dl>
               <button class="primary-button" id="add-line" type="button" disabled>Добавить в заявку</button>
             </div>
@@ -150,6 +152,7 @@
 
         <div class="order-footer">
           <div class="order-total"><span>Итого</span><strong id="order-total">0 ₽</strong></div>
+          <p class="delivery-note" id="delivery-note" hidden></p>
           <button class="secondary-button" id="download-excel" type="button" disabled>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/></svg>
             Скачать Excel
