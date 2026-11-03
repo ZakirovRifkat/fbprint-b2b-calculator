@@ -60,9 +60,7 @@
             <label for="article-search">Поиск по каталогу</label>
             <div class="search-field">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
-              <input id="article-search" type="search" autocomplete="off" placeholder="Например, 10165 или «грудка»" aria-controls="search-results" aria-expanded="false">
-              <kbd id="search-shortcut">Ctrl K</kbd>
-            </div>
+              <input id="article-search" type="search" autocomplete="off" placeholder="Например, 10165 или «грудка»" aria-controls="search-results" aria-expanded="false">            </div>
             <div class="search-results" id="search-results" role="listbox" hidden></div>
           </div>
           <article class="product" id="selected-product" hidden>
@@ -74,8 +72,8 @@
               <h3 id="product-name"></h3>
               <p><span id="product-size"></span><span aria-hidden="true">·</span><span id="product-color"></span></p>
             </div>
-            <button class="icon-button" id="change-product" type="button" aria-label="Выбрать другой артикул">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+            <button class="icon-button" id="change-product" type="button" aria-label="Сменить артикул" title="Сменить артикул">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
             </button>
           </article>
         </div>
@@ -94,7 +92,7 @@
               <label class="field-label" for="quantity">Количество, шт.</label>
               <div class="quantity-control">
                 <button type="button" id="quantity-minus" aria-label="Уменьшить количество" disabled>−</button>
-                <input id="quantity" type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" value="4200" aria-describedby="condition" disabled>
+                <input id="quantity" type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" aria-describedby="condition" disabled>
                 <button type="button" id="quantity-plus" aria-label="Увеличить количество" disabled>+</button>
               </div>
 
@@ -117,9 +115,9 @@
             </div>
 
             <div class="price-ticket" aria-live="polite">
-              <span>Стоимость позиции</span>
-              <strong id="line-total">—</strong>
-              <p><span id="line-quantity">0 шт.</span><span aria-hidden="true">×</span><span id="unit-price">—</span></p>
+              <span>Цена за штуку</span>
+              <strong id="unit-price">—</strong>
+              <p><span id="line-quantity">0 шт.</span><span aria-hidden="true">·</span><span id="line-total">—</span></p>
               <dl>
                 <div><dt>Минимальный тираж</dt><dd id="minimum-value">—</dd></div>
                 <div><dt>Кратность</dt><dd id="multiple-value">—</dd></div>

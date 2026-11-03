@@ -78,8 +78,7 @@ const urgencyLabels = {
 const conditionLabels = {
   good: 'Оптимальные условия',
   multiple: 'Требуется корректировка кратности',
-  reduced: 'Сниженный тираж',
-  'reduced-multiple': 'Сниженный тираж, требуется корректировка кратности'
+  reduced: 'Сниженный тираж'
 };
 
 const emptyCatalog = { schemaVersion: 1, version: '', companies: [], categories: [], articles: [] };
@@ -407,7 +406,8 @@ function renderSearch(query) {
     button.role = 'option';
     sku.textContent = item.sku;
     name.textContent = item.name;
-    size.textContent = category?.size ?? '';
+    size.textContent = inOrder(item) ? 'Уже в заявке' : category?.size ?? '';
+    button.disabled = inOrder(item);
     button.append(sku, name, size);
     button.addEventListener('click', () => selectArticle(item));
     root.append(button);
@@ -426,7 +426,20 @@ function renderSearch(query) {
   $('#article-search').ariaExpanded = 'true';
 }
 
+// Один артикул — одна позиция: повторно его не выбрать и не добавить.
+function lineKey(item) {
+  return `${item.companyId}/${item.sku}`;
+}
+
+function inOrder(item) {
+  return order.some(line => line.key === lineKey(item));
+}
+
 function selectArticle(nextArticle) {
+  if (inOrder(nextArticle)) {
+    toast('Этот артикул уже в заявке. Чтобы изменить тираж, удалите позицию и добавьте заново.');
+    return;
+  }
   article = nextArticle;
   $('#article-search').value = '';
   hideSearch();
@@ -446,6 +459,8 @@ function renderSelected({ resetQuantity = true } = {}) {
   const product = $('#selected-product');
   if (!article) {
     product.hidden = true;
+    $('#quantity').value = '';
+    $('#quantity').placeholder = '';
     setCalculationDisabled(true);
     $('#add-line').disabled = true;
     renderCalculation();
@@ -461,7 +476,9 @@ function renderSelected({ resetQuantity = true } = {}) {
   $('#product-size').textContent = category.size;
   $('#product-color').textContent = category.color;
   setCalculationDisabled(false);
-  if (resetQuantity) $('#quantity').value = category.minimumQuantity;
+  // При выборе артикула — минимальный тираж; без артикула поле пустое.
+  if (resetQuantity) $('#quantity').value = minimumValid(category);
+  $('#quantity').placeholder = `от ${integer.format(category.reducedRun?.minQuantity ?? minimumValid(category))}`;
   renderCalculation();
 }
 
@@ -477,13 +494,12 @@ function minimumValid(category) {
 // Три зоны тиража:
 // 1) меньше «Сниженное кол-во от» (или минимума, если сниженного нет) — не принимаем;
 // 2) сниженный тираж — цена «Стоимость сниженного тиража», только стандартный срок,
-//    кратность — шаг «от» (для категории 27: 1 400, 2 800);
+//    любое количество в диапазоне, кратность не проверяется;
 // 3) от минимума — цена по срочности, кратность категории.
 function quote(value, category, urgency) {
   const reduced = category.reducedRun;
   const minimum = minimumValid(category);
   const standard = category.prices.standard;
-  const atMinimum = `${integer.format(minimum)} шт. — ${money.format(roundMoney(minimum * standard))}`;
 
   if (value < (reduced ? reduced.minQuantity : category.minimumQuantity)
     || (reduced && value > reduced.maxQuantity && value < category.minimumQuantity)) {
@@ -500,30 +516,19 @@ function quote(value, category, urgency) {
   }
 
   if (value < category.minimumQuantity) {
-    const step = reduced.minQuantity;
-    const base = { urgency: 'standard', unitPrice: reduced.price, canAdd: true, tone: 'warning' };
-    if (value % step !== 0) {
-      const next = Math.ceil(value / step) * step;
-      const suggested = next > reduced.maxQuantity ? minimum : next;
-      return {
-        ...base,
-        status: 'reduced-multiple',
-        title: 'Тираж не соответствует кратности',
-        message: `Сниженный тираж оформляется кратно ${integer.format(step)} шт. Ближайшее допустимое значение — ${integer.format(suggested)} шт.`,
-        suggested
-      };
-    }
-    // Выгода перехода на минимум: сколько штук сверху и сколько это стоит (или экономит).
-    const extra = minimum - value;
-    const difference = roundMoney(minimum * standard - value * reduced.price);
+    // Клиенты сравнивают цену за штуку: выгода — сколько экономит каждая штука от минимума.
+    const saving = roundMoney(reduced.price - standard);
     return {
-      ...base,
+      urgency: 'standard',
+      unitPrice: reduced.price,
+      canAdd: true,
+      tone: 'warning',
       status: 'reduced',
       title: 'Сниженный тираж',
-      message: `При минимальном тираже ${atMinimum}. Срочный и экстренный заказ — от ${integer.format(minimum)} шт.`,
-      benefit: difference > 0
-        ? `На ${integer.format(extra)} шт. больше — всего +${money.format(difference)}`
-        : `На ${integer.format(extra)} шт. больше и на ${money.format(-difference)} дешевле`,
+      message: `От ${integer.format(minimum)} шт. — ${money.format(standard)} за штуку. Срочный и экстренный заказ — от ${integer.format(minimum)} шт.`,
+      benefit: saving > 0
+        ? `Экономия ${money.format(saving)} на каждой штуке (−${Math.round(saving / reduced.price * 100)}%)`
+        : null,
       suggested: minimum
     };
   }
@@ -571,12 +576,43 @@ function selectedUrgency() {
   return document.querySelector('[name=urgency]:checked')?.value ?? 'standard';
 }
 
+// Артикул выбран, количество ещё не введено: нейтральная подсказка без цены.
+function renderEmptyQuantity(category) {
+  const lowest = category.reducedRun?.minQuantity ?? minimumValid(category);
+  document.querySelectorAll('[name=urgency]').forEach(input => {
+    input.disabled = false;
+    delete input.parentElement.dataset.tooltip;
+  });
+  $('#condition').dataset.state = 'idle';
+  $('#condition-title').textContent = 'Укажите количество';
+  $('#condition-message').textContent = `Минимальный заказ — ${integer.format(lowest)} шт.`;
+  $('#condition-benefit').hidden = true;
+  $('#apply-suggestion').hidden = true;
+  $('#unit-price').textContent = '—';
+  fitText($('#unit-price'));
+  $('#line-quantity').textContent = '0 шт.';
+  $('#line-total').textContent = '—';
+  $('#minimum-value').textContent = integer.format(category.minimumQuantity);
+  $('#multiple-value').textContent = integer.format(category.multiple);
+  $('#reduced-value').textContent = category.reducedRun
+    ? `${integer.format(category.reducedRun.minQuantity)}–${integer.format(category.reducedRun.maxQuantity)}`
+    : 'нет';
+  $('#add-line').disabled = true;
+  $('#add-line').textContent = inOrder(article) ? 'Уже в заявке' : 'Добавить в заявку';
+}
+
 // Срочный и экстренный заказ — только от минимального тиража.
 function syncUrgency(value, category) {
   const onlyStandard = value < category.minimumQuantity;
   document.querySelectorAll('[name=urgency]').forEach(input => {
     input.disabled = onlyStandard && input.value !== 'standard';
     if (input.disabled && input.checked) $('[name=urgency][value=standard]').checked = true;
+    // Подсказка, почему срок недоступен: при наведении и при нажатии (на телефоне).
+    if (input.disabled) {
+      input.parentElement.dataset.tooltip = `${urgencyLabels[input.value]} заказ — от минимального тиража ${integer.format(minimumValid(category))} шт.`;
+    } else {
+      delete input.parentElement.dataset.tooltip;
+    }
   });
 }
 
@@ -601,6 +637,10 @@ function renderCalculation() {
 
   const category = categories().get(article.categoryId);
   const value = quantity();
+  if (!value) {
+    renderEmptyQuantity(category);
+    return;
+  }
   syncUrgency(value, category);
   const result = quote(value, category, selectedUrgency());
   condition.dataset.state = result.tone;
@@ -616,16 +656,19 @@ function renderCalculation() {
       renderCalculation();
     };
   }
-  $('#line-total').textContent = result.canAdd ? money.format(roundMoney(value * result.unitPrice)) : '—';
-  fitText($('#line-total'));
-  $('#line-quantity').textContent = `${integer.format(value)} шт.`;
+  // Клиенты сравнивают цену за штуку, поэтому крупно — она, а сумма позиции — мелко.
   $('#unit-price').textContent = result.canAdd ? money.format(result.unitPrice) : '—';
+  fitText($('#unit-price'));
+  $('#line-quantity').textContent = `${integer.format(value)} шт.`;
+  $('#line-total').textContent = result.canAdd ? money.format(roundMoney(value * result.unitPrice)) : '—';
   $('#minimum-value').textContent = integer.format(category.minimumQuantity);
   $('#multiple-value').textContent = integer.format(category.multiple);
   $('#reduced-value').textContent = category.reducedRun
     ? `${integer.format(category.reducedRun.minQuantity)}–${integer.format(category.reducedRun.maxQuantity)}`
     : 'нет';
-  $('#add-line').disabled = !result.canAdd;
+  const added = inOrder(article);
+  $('#add-line').disabled = !result.canAdd || added;
+  $('#add-line').textContent = added ? 'Уже в заявке' : 'Добавить в заявку';
 }
 
 function createId() {
@@ -641,10 +684,15 @@ function addLine() {
     toast(result.message);
     return;
   }
+  if (inOrder(article)) {
+    toast('Этот артикул уже в заявке.');
+    return;
+  }
 
   const company = data.companies.find(item => item.id === article.companyId);
   order.push({
     id: createId(),
+    key: lineKey(article),
     company: company.name,
     sku: article.sku,
     name: article.name,
@@ -697,6 +745,9 @@ function renderOrder() {
   $('#order-counter').textContent = order.length
     ? `${order.length} ${plural(order.length, 'позиция', 'позиции', 'позиций')}`
     : 'Пока нет позиций';
+  // Кнопка «Добавить» и пометки «Уже в заявке» зависят от состава заявки.
+  renderCalculation();
+  if (!$('#search-results').hidden) renderSearch($('#article-search').value);
   ['#clear-order', '#download-excel', '#submit-order'].forEach(selector => {
     $(selector).disabled = !order.length;
   });
@@ -918,7 +969,7 @@ $('#change-product').addEventListener('click', () => {
 });
 $('#quantity').addEventListener('input', renderCalculation);
 $('#quantity').addEventListener('blur', () => {
-  $('#quantity').value = quantity();
+  $('#quantity').value = quantity() || '';
   renderCalculation();
 });
 $('#quantity-minus').addEventListener('click', () => {
@@ -933,6 +984,9 @@ $('#quantity-plus').addEventListener('click', () => {
 });
 document.querySelectorAll('[name=urgency]').forEach(input => {
   input.addEventListener('change', renderCalculation);
+  input.parentElement.addEventListener('click', () => {
+    if (input.disabled && input.parentElement.dataset.tooltip) toast(input.parentElement.dataset.tooltip);
+  });
 });
 $('#add-line').addEventListener('click', addLine);
 $('#clear-order').addEventListener('click', () => {
@@ -960,10 +1014,7 @@ $('#contact-form').addEventListener('submit', event => {
 });
 $('#refresh-data').addEventListener('click', loadData);
 
-const platform = navigator.userAgentData?.platform ?? navigator.platform ?? '';
-$('#search-shortcut').textContent = /mac/i.test(platform) ? '⌘ K' : 'Ctrl K';
-
-const refitTotals = () => ['#line-total', '#order-total'].forEach(selector => fitText($(selector)));
+const refitTotals = () => ['#unit-price', '#order-total'].forEach(selector => fitText($(selector)));
 document.fonts?.ready.then(refitTotals);
 window.addEventListener('resize', refitTotals);
 
