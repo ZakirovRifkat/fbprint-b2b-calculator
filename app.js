@@ -238,6 +238,8 @@ function setDataStatus(state, message) {
   meta.ariaBusy = String(state === 'loading');
   $('#data-status').textContent = message;
   $('#refresh-data').disabled = state === 'loading';
+  // Пока каталог загружается, страница закрыта целиком: без данных калькулятор пуст.
+  $('#page-loader').hidden = state !== 'loading';
 }
 
 function applyCatalog(nextData) {
@@ -264,38 +266,51 @@ function showCatalogError(title, message) {
   $('#catalog-alert').hidden = !title;
 }
 
-// Пароль выдаёт менеджер FB Print. Проверяет его Apps Script (свойство ACCESS_PASSWORD),
-// сайт только хранит его в браузере, чтобы не спрашивать при каждом входе.
+// Пароль выдаёт менеджер FB Print. Проверяет его Apps Script (свойство ACCESS_PASSWORD).
+// С галочкой «Сохранить пароль» он лежит в localStorage и переживает закрытие браузера,
+// без неё — в sessionStorage: переживает перезагрузку, но забывается вместе с вкладкой.
 const passwordKey = 'fbprint-access-password';
 const accessErrors = ['ACCESS_DENIED', 'ACCESS_NOT_CONFIGURED'];
 let sessionPassword = '';
 
-function accessPassword() {
-  if (sessionPassword) return sessionPassword;
+function readStorage(storage) {
   try {
-    sessionPassword = localStorage.getItem(passwordKey) ?? '';
+    return storage.getItem(passwordKey) ?? '';
   } catch {
-    sessionPassword = '';
+    return '';
   }
+}
+
+function writeStorage(storage, value) {
+  try {
+    if (value) storage.setItem(passwordKey, value);
+    else storage.removeItem(passwordKey);
+  } catch {
+    // Хранилище недоступно (приватный режим) — пароль живёт до перезагрузки страницы.
+  }
+}
+
+function accessPassword() {
+  sessionPassword ||= readStorage(localStorage) || readStorage(sessionStorage);
   return sessionPassword;
 }
 
-function rememberPassword(value) {
+function rememberPassword(value, persist) {
   sessionPassword = value;
-  try {
-    localStorage.setItem(passwordKey, value);
-  } catch {
-    // Без localStorage пароль живёт до закрытия вкладки.
-  }
+  writeStorage(localStorage, persist ? value : '');
+  writeStorage(sessionStorage, persist ? '' : value);
 }
 
 function forgetPassword() {
   sessionPassword = '';
-  try {
-    localStorage.removeItem(passwordKey);
-  } catch {
-    // Хранилище недоступно — забывать нечего.
-  }
+  writeStorage(localStorage, '');
+  writeStorage(sessionStorage, '');
+}
+
+function showPassword(visible) {
+  $('#login-password').type = visible ? 'text' : 'password';
+  $('#toggle-password').ariaPressed = String(visible);
+  $('#toggle-password').ariaLabel = visible ? 'Скрыть пароль' : 'Показать пароль';
 }
 
 function askPassword(message = '') {
@@ -304,6 +319,7 @@ function askPassword(message = '') {
   $('#login-error').textContent = message;
   $('#login-error').hidden = !message;
   $('#login-form').reset();
+  showPassword(false);
   if (!$('#login-dialog').open) $('#login-dialog').showModal();
   $('#login-password').focus();
 }
@@ -1118,9 +1134,13 @@ $('#login-form').addEventListener('submit', event => {
   event.preventDefault();
   const value = $('#login-password').value.trim();
   if (!value) return;
-  rememberPassword(value);
+  rememberPassword(value, $('#remember-password').checked);
   $('#login-dialog').close();
   loadData();
+});
+$('#toggle-password').addEventListener('click', () => {
+  showPassword($('#login-password').type === 'password');
+  $('#login-password').focus();
 });
 // Без пароля калькулятор пуст, поэтому окно входа не закрывается по Esc.
 $('#login-dialog').addEventListener('cancel', event => event.preventDefault());

@@ -143,8 +143,19 @@ dialog::backdrop{background:rgba(24,17,67,.68)}
 dialog form{padding:36px;position:relative}
 .dialog-step{display:grid;gap:16px}
 #login-dialog::backdrop{background:var(--ink)}
+.page-loader{position:fixed;inset:0;z-index:50;display:grid;place-content:center;justify-items:center;gap:18px;background:var(--ink);color:#fff}
+.page-loader p{margin:0;font-weight:700}
+.page-loader-spinner{width:44px;height:44px;border:4px solid rgba(255,255,255,.2);border-top-color:var(--pink);border-radius:50%}
 .login-field{display:grid;gap:7px;font-weight:700}
-.login-field input{height:50px;border:1px solid var(--line);border-radius:10px;padding:0 13px;font-weight:400}
+.password-field{position:relative}
+.password-field input{width:100%;height:50px;border:1px solid var(--line);border-radius:10px;padding:0 52px 0 13px;font-weight:400}
+.password-toggle{position:absolute;top:5px;right:5px;width:40px;height:40px;display:grid;place-items:center;border:0;border-radius:8px;background:none;color:var(--muted)}
+.password-toggle:hover{background:#f1eff7;color:var(--ink)}
+.password-toggle svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.password-toggle .eye-closed,.password-toggle[aria-pressed=true] .eye-open{display:none}
+.password-toggle[aria-pressed=true] .eye-closed{display:block}
+.remember-field{display:flex;align-items:center;gap:10px;color:var(--ink);cursor:pointer}
+.remember-field input{width:20px;height:20px;margin:0;accent-color:var(--pink);cursor:pointer}
 .header-meta[data-state=locked] .sync-dot{background:var(--yellow);box-shadow:0 0 0 5px rgba(255,198,0,.14)}
 dialog p{margin:0 0 6px;color:var(--muted)}
 .dialog-note{padding:11px 13px;border-radius:10px;background:var(--warn-bg);color:var(--warn)}
@@ -190,6 +201,8 @@ to{clip-path:inset(0)}
 to{opacity:1;transform:none}
 }
 @keyframes pulse{to{transform:scale(1.35)}}
+.page-loader-spinner{animation:spin .9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 }
 
 
