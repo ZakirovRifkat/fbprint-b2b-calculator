@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- Видна с первого кадра и закрывает страницу, пока каталог не загружен или не нужен пароль. -->
+  <!-- Экран загрузки при входе по сохранённому паролю. Виден с первого кадра, чтобы страница без данных не мелькала. -->
   <div class="page-loader" id="page-loader" role="status" aria-live="polite">
     <span class="page-loader-spinner" aria-hidden="true"></span>
     <p>Загружаем каталог…</p>
@@ -184,7 +184,9 @@
         </div>
         <label class="remember-field"><input id="remember-password" type="checkbox" checked> Сохранить пароль на этом устройстве</label>
         <p class="dialog-error" id="login-error" role="alert" hidden></p>
-        <button class="primary-button primary-button--accent" type="submit">Войти</button>
+        <button class="primary-button primary-button--accent login-submit" id="login-submit" type="submit">
+          <span class="button-spinner" aria-hidden="true"></span><span id="login-submit-label">Войти</span>
+        </button>
       </div>
     </form>
   </dialog>

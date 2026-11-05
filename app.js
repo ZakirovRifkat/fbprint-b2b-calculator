@@ -238,8 +238,6 @@ function setDataStatus(state, message) {
   meta.ariaBusy = String(state === 'loading');
   $('#data-status').textContent = message;
   $('#refresh-data').disabled = state === 'loading';
-  // Пока каталог загружается, страница закрыта целиком: без данных калькулятор пуст.
-  $('#page-loader').hidden = state !== 'loading';
 }
 
 function applyCatalog(nextData) {
@@ -313,20 +311,46 @@ function showPassword(visible) {
   $('#toggle-password').ariaLabel = visible ? 'Скрыть пароль' : 'Показать пароль';
 }
 
+// Пока пароль проверяется, окно входа остаётся открытым, а кнопка «Войти» крутит загрузку.
+function setLoginBusy(busy) {
+  $('#login-submit').disabled = busy;
+  $('#login-submit').ariaBusy = String(busy);
+  $('#login-password').readOnly = busy;
+}
+
+// Экран «Загружаем каталог» — только при входе по сохранённому паролю.
+// Пароль, введённый вручную, проверяется с загрузкой на кнопке «Войти».
+function showPageLoader(visible) {
+  $('#page-loader').hidden = !visible;
+}
+
+// При ошибке введённый пароль остаётся в поле выделенным — опечатку легко поправить.
+// Если не подошёл сохранённый пароль, экран загрузки сменяется окном входа с ошибкой.
 function askPassword(message = '') {
+  showPageLoader(false);
+  setLoginBusy(false);
   setDataStatus('locked', 'Нужен пароль');
   showCatalogError('');
   $('#login-error').textContent = message;
   $('#login-error').hidden = !message;
-  $('#login-form').reset();
-  showPassword(false);
-  if (!$('#login-dialog').open) $('#login-dialog').showModal();
+  if (!$('#login-dialog').open) {
+    $('#login-password').value = '';
+    showPassword(false);
+    $('#login-dialog').showModal();
+  }
   $('#login-password').focus();
+  $('#login-password').select();
+}
+
+function closeLogin() {
+  setLoginBusy(false);
+  if ($('#login-dialog').open) $('#login-dialog').close();
 }
 
 async function loadData() {
   const url = apiUrl();
   if (!url) {
+    showPageLoader(false);
     applyCatalog(normalizeCatalog(demoCatalog));
     setDataStatus('demo', 'Демо-данные');
     return;
@@ -337,6 +361,9 @@ async function loadData() {
     askPassword();
     return;
   }
+  // Окно входа открыто — значит, пароль ввели вручную и загрузка крутится на кнопке.
+  const typedPassword = $('#login-dialog').open;
+  showPageLoader(!typedPassword);
 
   loadController?.abort();
   const controller = new AbortController();
@@ -365,10 +392,13 @@ async function loadData() {
     if (accessErrors.includes(payload?.error?.code)) {
       forgetPassword();
       applyCatalog(emptyCatalog);
-      askPassword(payload.error.message);
+      askPassword(payload.error.code === 'ACCESS_DENIED' && !typedPassword
+        ? 'Сохранённый пароль больше не подходит — введите новый.'
+        : payload.error.message);
       return;
     }
 
+    closeLogin();
     applyCatalog(normalizeCatalog(payload));
     loadedAt = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
     setDataStatus('live', `Данные актуальны · ${loadedAt}`);
@@ -376,6 +406,8 @@ async function loadData() {
   } catch (error) {
     // Запрос отменён более новым нажатием «Обновить» — ошибки нет.
     if (controller !== loadController) return;
+    // Пароль принят (или не проверен из-за сети) — ошибку каталога показываем на странице, а не в окне входа.
+    closeLogin();
     const message = error.name === 'AbortError'
       ? 'API не ответил вовремя'
       : error.message;
@@ -390,6 +422,8 @@ async function loadData() {
     toast('Ошибка загрузки каталога.');
   } finally {
     clearTimeout(timeout);
+    // Запрос, отменённый более новым, экран не трогает — его уберёт новый запрос.
+    if (controller === loadController) showPageLoader(false);
   }
 }
 
@@ -1135,7 +1169,8 @@ $('#login-form').addEventListener('submit', event => {
   const value = $('#login-password').value.trim();
   if (!value) return;
   rememberPassword(value, $('#remember-password').checked);
-  $('#login-dialog').close();
+  $('#login-error').hidden = true;
+  setLoginBusy(true);
   loadData();
 });
 $('#toggle-password').addEventListener('click', () => {
