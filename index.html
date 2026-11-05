@@ -60,7 +60,7 @@
             <label for="article-search">Поиск по каталогу</label>
             <div class="search-field">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
-              <input id="article-search" type="search" autocomplete="off" placeholder="Например, 10165 или «грудка»" aria-controls="search-results" aria-expanded="false">            </div>
+              <input id="article-search" type="search" autocomplete="off" placeholder="Номер артикула или часть названия" aria-controls="search-results" aria-expanded="false">            </div>
             <div class="search-results" id="search-results" role="listbox" hidden></div>
           </div>
           <article class="product" id="selected-product" hidden>
@@ -161,6 +161,18 @@
       </aside>
     </section>
   </main>
+
+  <dialog id="login-dialog">
+    <form id="login-form">
+      <div class="dialog-step">
+        <h2>Вход в калькулятор</h2>
+        <p>Введите пароль, который выдал менеджер FB Print.</p>
+        <label class="login-field">Пароль<input id="login-password" name="password" type="password" required autocomplete="current-password"></label>
+        <p class="dialog-error" id="login-error" role="alert" hidden></p>
+        <button class="primary-button primary-button--accent" type="submit">Войти</button>
+      </div>
+    </form>
+  </dialog>
 
   <!-- Контакты не собираем: менеджер получает только состав заявки и её номер. -->
   <dialog id="order-dialog">

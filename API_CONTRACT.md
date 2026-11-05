@@ -9,10 +9,13 @@ Google Apps Script только читает Google Sheets, отбрасывае
 ## Запрос
 
 ```http
-GET <apiUrl>?action=catalog
+POST <apiUrl>
+Content-Type: text/plain;charset=UTF-8
+
+{"action": "catalog", "password": "…"}
 ```
 
-Параметр `ts`, который фронтенд добавляет для обхода кеша, API может игнорировать.
+Пароль сравнивается со свойством скрипта `ACCESS_PASSWORD`. GET-запрос и запрос без верного пароля получают `ACCESS_DENIED` и не видят каталог.
 
 ## Успешный ответ
 
@@ -34,31 +37,31 @@ GET <apiUrl>?action=catalog
   ],
   "categories": [
     {
-      "id": "27",
+      "id": "1",
       "size": "80 × 120 мм",
       "color": "Текст с фоном",
-      "minimumQuantity": 4200,
-      "rollQuantity": 1400,
-      "lanes": 3,
-      "multiple": 4200,
+      "minimumQuantity": 4000,
+      "rollQuantity": 1000,
+      "lanes": 4,
+      "multiple": 4000,
       "prices": {
-        "standard": 1.2,
-        "urgent": 1.8,
-        "emergency": 2.4
+        "standard": 1,
+        "urgent": 1.5,
+        "emergency": 2
       },
       "reducedRun": {
-        "minQuantity": 1400,
-        "maxQuantity": 4199,
-        "price": 1.62
+        "minQuantity": 1000,
+        "maxQuantity": 3999,
+        "price": 1.4
       }
     }
   ],
   "articles": [
     {
       "companyId": "global_food",
-      "sku": "10165",
-      "categoryId": "27",
-      "name": "ЭТИКЕТКА ГРУДКА КУРИНАЯ С КАРТОФЕЛЕМ..."
+      "sku": "1001",
+      "categoryId": "1",
+      "name": "ЭТИКЕТКА САЛАТ…"
     }
   ]
 }
@@ -70,7 +73,7 @@ GET <apiUrl>?action=catalog
 - `version` — метка набора данных или ISO-дата формирования ответа.
 - Все `id`, `companyId`, `categoryId` и `sku` передаются строками. Так артикулы с ведущими нулями не теряются.
 - Все цены и количества передаются JSON-числами, без `₽`, пробелов и десятичной запятой.
-- Цены передаются так, как они хранятся в ячейке. Например, срочная цена категории 6 — `=0,75×1,5`: таблица показывает «1,13 ₽», а API передаёт `1.125`. Хвосты двоичной арифметики вроде `1.6199999999999999` допустимы.
+- Цены передаются так, как они хранятся в ячейке. Например, срочная цена — формула `=0,75×1,5`: таблица показывает «1,13 ₽», а API передаёт `1.125`. Хвосты двоичной арифметики вроде `1.6199999999999999` допустимы.
 - Фронтенд округляет каждую цену до копеек, как таблица показывает её на экране: `1.125` → `1.13`. Сумма позиции — тираж × округлённая цена, тоже до копеек: 5 600 × 1,13 = 6 328 ₽.
 - `company.id` и `category.id` уникальны.
 - Сочетание `article.companyId + article.sku` уникально.
@@ -140,7 +143,10 @@ Apps Script не умеет менять HTTP-статус, поэтому ош�
 
 | Код | Когда |
 | --- | --- |
-| `UNKNOWN_ACTION` | `action` отсутствует или не равен `catalog` |
+| `ACCESS_DENIED` | нет пароля, неверный пароль или GET-запрос; сайт снова показывает окно входа |
+| `ACCESS_NOT_CONFIGURED` | в свойствах скрипта не задан `ACCESS_PASSWORD` |
+| `INVALID_REQUEST` | тело запроса не JSON |
+| `UNKNOWN_ACTION` | `action` не равен `catalog` или `order` |
 | `CATALOG_READ_FAILED` | лист не найден, нет доступа или другая ошибка чтения |
 
 `message` фронтенд показывает пользователю как есть.
@@ -165,6 +171,7 @@ Content-Type: text/plain;charset=UTF-8
 ```json
 {
   "action": "order",
+  "password": "…",
   "number": "FB-0311-0042",
   "website": "",
   "catalogVersion": "2026-11-03T08:30:00.000Z",
@@ -172,8 +179,8 @@ Content-Type: text/plain;charset=UTF-8
   "lines": [
     {
       "company": "Глобал Фуд",
-      "sku": "10167",
-      "name": "ЭТИКЕТКА ВЕРХ БОРЩ УКРАИНСКИЙ С КУРИЦЕЙ 1 КГ",
+      "sku": "1002",
+      "name": "ЭТИКЕТКА СУП…",
       "quantity": 5600,
       "urgency": "Срочный",
       "unitPrice": 1.13,
@@ -191,4 +198,5 @@ Content-Type: text/plain;charset=UTF-8
 - Цены и суммы в заявке Apps Script не пересчитывает, но сверяет с таблицей по правилам сайта и помечает расхождения в сообщении менеджеру. Подделанная заявка всё равно отправляется — с пометками.
 - `condition` пустой, если тираж оптимальный.
 - Успех: `{ "ok": true }`.
+- Заявка тоже требует `password`; без него — `ACCESS_DENIED`.
 - Ошибки: `UNKNOWN_ACTION`, `INVALID_ORDER`, `TOO_MANY_ORDERS`, `ORDER_SEND_FAILED` в том же формате `error`, что и у каталога.

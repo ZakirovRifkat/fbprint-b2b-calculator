@@ -1,13 +1,14 @@
 /**
  * FB Print — API B2B-калькулятора.
- * GET ?action=catalog — читает таблицу и отдаёт каталог (API_CONTRACT.md).
- * POST {action: 'order'} — пересылает заявку менеджеру в Telegram.
- * Таблицу не изменяет и ничего не рассчитывает. Проверка каталога — в app.js.
+ * POST {action: 'catalog', password} — читает таблицу и отдаёт каталог (API_CONTRACT.md).
+ * POST {action: 'order', password, …} — пересылает заявку менеджеру в Telegram.
+ * Без верного пароля не отдаёт ничего. Таблицу не изменяет. Расчёт — в app.js.
  *
  * Скрипт создаётся из самой таблицы («Расширения» → «Apps Script») и читает только её:
  * право spreadsheets.currentonly не даёт доступа к другим таблицам владельца.
  *
  * Свойства скрипта («Настройки проекта» → «Свойства скрипта»):
+ * ACCESS_PASSWORD — пароль для входа на сайт; пока он не задан, скрипт никому ничего не отдаёт;
  * TELEGRAM_BOT_TOKEN — токен от @BotFather, TELEGRAM_CHAT_ID — чаты менеджеров через запятую.
  */
 
@@ -20,16 +21,18 @@ const COMPANIES = [
   { id: 'studio_vkusa', name: 'Студия Вкуса', sheet: 'Список_артикулов_СтудияВкуса' }
 ];
 
-function doGet(e) {
-  if (!e || !e.parameter || e.parameter.action !== 'catalog') {
-    return json({ error: { code: 'UNKNOWN_ACTION', message: 'Нужен параметр ?action=catalog' } });
-  }
-  try {
-    return json(readCatalog());
-  } catch (error) {
-    console.error(error);
-    return json({ error: { code: 'CATALOG_READ_FAILED', message: `Не удалось прочитать таблицу: ${error.message}` } });
-  }
+// Открытый адрес ничего не отдаёт: пароль передаётся только в теле POST, а не в ссылке.
+function doGet() {
+  return json({ error: { code: 'ACCESS_DENIED', message: 'Доступ только по паролю через сайт калькулятора' } });
+}
+
+// Пароль сравнивается с ACCESS_PASSWORD. Неверный пароль отвечает с задержкой — так перебор идёт медленно.
+function checkPassword(request) {
+  const expected = PropertiesService.getScriptProperties().getProperty('ACCESS_PASSWORD');
+  if (!expected) return { code: 'ACCESS_NOT_CONFIGURED', message: 'Доступ к калькулятору ещё не настроен' };
+  if (typeof request.password === 'string' && request.password === expected) return null;
+  Utilities.sleep(1500);
+  return { code: 'ACCESS_DENIED', message: 'Неверный пароль' };
 }
 
 function readCatalog() {
@@ -74,8 +77,24 @@ function readCatalog() {
 }
 
 function doPost(e) {
+  let order;
   try {
-    const order = JSON.parse(e.postData.contents);
+    order = JSON.parse(e.postData.contents);
+  } catch (error) {
+    return json({ error: { code: 'INVALID_REQUEST', message: 'Неверный запрос' } });
+  }
+  const denied = checkPassword(order);
+  if (denied) return json({ error: denied });
+
+  if (order.action === 'catalog') {
+    try {
+      return json(readCatalog());
+    } catch (error) {
+      console.error(error);
+      return json({ error: { code: 'CATALOG_READ_FAILED', message: `Не удалось прочитать таблицу: ${error.message}` } });
+    }
+  }
+  try {
     if (order.action !== 'order') {
       return json({ error: { code: 'UNKNOWN_ACTION', message: 'Неизвестное действие' } });
     }

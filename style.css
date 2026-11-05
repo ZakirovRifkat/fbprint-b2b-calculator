@@ -142,6 +142,10 @@ dialog{border:0;border-radius:20px;padding:0;max-width:520px;width:calc(100% - 3
 dialog::backdrop{background:rgba(24,17,67,.68)}
 dialog form{padding:36px;position:relative}
 .dialog-step{display:grid;gap:16px}
+#login-dialog::backdrop{background:var(--ink)}
+.login-field{display:grid;gap:7px;font-weight:700}
+.login-field input{height:50px;border:1px solid var(--line);border-radius:10px;padding:0 13px;font-weight:400}
+.header-meta[data-state=locked] .sync-dot{background:var(--yellow);box-shadow:0 0 0 5px rgba(255,198,0,.14)}
 dialog p{margin:0 0 6px;color:var(--muted)}
 .dialog-note{padding:11px 13px;border-radius:10px;background:var(--warn-bg);color:var(--warn)}
 .dialog-error{padding:11px 13px;border-radius:10px;background:var(--danger-bg);color:var(--danger)}

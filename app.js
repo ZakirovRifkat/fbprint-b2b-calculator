@@ -1,63 +1,52 @@
+// Вымышленный каталог для разработки (apiUrl пуст): настоящие цены и клиенты — только в таблице.
 const demoCatalog = {
   schemaVersion: 1,
-  version: 'demo-2026-11-03',
+  version: 'demo',
   companies: [
-    { id: 'global_food', name: 'Глобал Фуд' },
-    { id: 'studio_vkusa', name: 'Студия Вкуса' }
+    { id: 'demo_a', name: 'Демо-компания А' },
+    { id: 'demo_b', name: 'Демо-компания Б' }
   ],
   categories: [
     {
-      id: '27',
+      id: '1',
       size: '80 × 120 мм',
       color: 'Текст с фоном',
-      minimumQuantity: 4200,
-      rollQuantity: 1400,
-      lanes: 3,
-      multiple: 4200,
-      prices: { standard: 1.2, urgent: 1.8, emergency: 2.4 },
-      reducedRun: { minQuantity: 1400, maxQuantity: 4199, price: 1.62 }
+      minimumQuantity: 4000,
+      rollQuantity: 1000,
+      lanes: 4,
+      multiple: 4000,
+      prices: { standard: 1, urgent: 1.5, emergency: 2 },
+      reducedRun: { minQuantity: 1000, maxQuantity: 3999, price: 1.4 }
     },
     {
-      id: '6',
+      id: '2',
       size: '60 × 100 мм',
       color: 'Ч/Б',
-      minimumQuantity: 5600,
-      rollQuantity: 1400,
-      lanes: 4,
-      multiple: 5600,
-      prices: { standard: 0.75, urgent: 1.125, emergency: 1.5 },
-      reducedRun: { minQuantity: 1400, maxQuantity: 5599, price: 1.0125 }
+      minimumQuantity: 6000,
+      rollQuantity: 2000,
+      lanes: 3,
+      multiple: 6000,
+      prices: { standard: 0.5, urgent: 0.75, emergency: 1 },
+      reducedRun: { minQuantity: 2000, maxQuantity: 5999, price: 0.7 }
     },
     {
-      id: '38',
+      id: '3',
       size: 'D80',
       color: 'Цветная',
-      minimumQuantity: 7200,
-      rollQuantity: 1800,
+      minimumQuantity: 5000,
+      rollQuantity: 2500,
       lanes: 2,
-      multiple: 3600,
-      prices: { standard: 1.09, urgent: 1.635, emergency: 2.18 },
-      reducedRun: { minQuantity: 1800, maxQuantity: 7199, price: 1.4715 }
-    },
-    {
-      id: '18',
-      size: '60 × 70 мм',
-      color: 'Текст с фоном',
-      minimumQuantity: 5400,
-      rollQuantity: 1800,
-      lanes: 3,
-      multiple: 5400,
-      prices: { standard: 1.03, urgent: 1.545, emergency: 2.06 },
-      reducedRun: { minQuantity: 1800, maxQuantity: 5399, price: 1.3905 }
+      multiple: 2500,
+      prices: { standard: 2, urgent: 3, emergency: 4 },
+      reducedRun: null
     }
   ],
   articles: [
-    { companyId: 'global_food', sku: '10165', categoryId: '27', name: 'Этикетка «Грудка куриная с картофелем»' },
-    { companyId: 'global_food', sku: '10167', categoryId: '6', name: 'Этикетка «Борщ украинский с курицей»' },
-    { companyId: 'global_food', sku: '10338', categoryId: '38', name: 'Этикетка «Борщ Украинский»' },
-    { companyId: 'global_food', sku: '10351', categoryId: '18', name: 'Этикетка «Борщ вегетарианский»' },
-    { companyId: 'studio_vkusa', sku: '20110', categoryId: '27', name: 'Этикетка «Салат Оливье»' },
-    { companyId: 'studio_vkusa', sku: '20118', categoryId: '18', name: 'Этикетка «Суп-крем куриный»' }
+    { companyId: 'demo_a', sku: '1001', categoryId: '1', name: 'Демо-этикетка «Салат»' },
+    { companyId: 'demo_a', sku: '1002', categoryId: '2', name: 'Демо-этикетка «Суп»' },
+    { companyId: 'demo_a', sku: '1003', categoryId: '3', name: 'Демо-этикетка «Стикер»' },
+    { companyId: 'demo_b', sku: '2001', categoryId: '1', name: 'Демо-этикетка «Сэндвич»' },
+    { companyId: 'demo_b', sku: '2002', categoryId: '2', name: 'Демо-этикетка «Каша»' }
   ]
 };
 
@@ -275,11 +264,61 @@ function showCatalogError(title, message) {
   $('#catalog-alert').hidden = !title;
 }
 
+// Пароль выдаёт менеджер FB Print. Проверяет его Apps Script (свойство ACCESS_PASSWORD),
+// сайт только хранит его в браузере, чтобы не спрашивать при каждом входе.
+const passwordKey = 'fbprint-access-password';
+const accessErrors = ['ACCESS_DENIED', 'ACCESS_NOT_CONFIGURED'];
+let sessionPassword = '';
+
+function accessPassword() {
+  if (sessionPassword) return sessionPassword;
+  try {
+    sessionPassword = localStorage.getItem(passwordKey) ?? '';
+  } catch {
+    sessionPassword = '';
+  }
+  return sessionPassword;
+}
+
+function rememberPassword(value) {
+  sessionPassword = value;
+  try {
+    localStorage.setItem(passwordKey, value);
+  } catch {
+    // Без localStorage пароль живёт до закрытия вкладки.
+  }
+}
+
+function forgetPassword() {
+  sessionPassword = '';
+  try {
+    localStorage.removeItem(passwordKey);
+  } catch {
+    // Хранилище недоступно — забывать нечего.
+  }
+}
+
+function askPassword(message = '') {
+  setDataStatus('locked', 'Нужен пароль');
+  showCatalogError('');
+  $('#login-error').textContent = message;
+  $('#login-error').hidden = !message;
+  $('#login-form').reset();
+  if (!$('#login-dialog').open) $('#login-dialog').showModal();
+  $('#login-password').focus();
+}
+
 async function loadData() {
   const url = apiUrl();
   if (!url) {
     applyCatalog(normalizeCatalog(demoCatalog));
     setDataStatus('demo', 'Демо-данные');
+    return;
+  }
+
+  const password = accessPassword();
+  if (!password) {
+    askPassword();
     return;
   }
 
@@ -291,10 +330,10 @@ async function loadData() {
   setDataStatus('loading', 'Обновляем данные…');
 
   try {
-    const endpoint = new URL(url, window.location.href);
-    endpoint.searchParams.set('action', 'catalog');
-    endpoint.searchParams.set('ts', Date.now());
-    const response = await fetch(endpoint, {
+    // Пароль — в теле POST, а не в ссылке: так он не попадает в историю и журналы.
+    const response = await fetch(url, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'catalog', password }),
       redirect: 'follow',
       cache: 'no-store',
       signal: controller.signal
@@ -306,6 +345,12 @@ async function loadData() {
       payload = await response.json();
     } catch {
       throw new Error('API вернул не JSON');
+    }
+    if (accessErrors.includes(payload?.error?.code)) {
+      forgetPassword();
+      applyCatalog(emptyCatalog);
+      askPassword(payload.error.message);
+      return;
     }
 
     applyCatalog(normalizeCatalog(payload));
@@ -816,6 +861,7 @@ async function submitOrder() {
   const number = orderNumber();
   const payload = {
     action: 'order',
+    password: accessPassword(),
     number,
     website: new FormData(form).get('website'),
     catalogVersion: data.version,
@@ -1068,6 +1114,16 @@ $('#order-form').addEventListener('submit', event => {
   toast('Демонстрация: отправка менеджеру пока не подключена.');
 });
 $('#refresh-data').addEventListener('click', loadData);
+$('#login-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const value = $('#login-password').value.trim();
+  if (!value) return;
+  rememberPassword(value);
+  $('#login-dialog').close();
+  loadData();
+});
+// Без пароля калькулятор пуст, поэтому окно входа не закрывается по Esc.
+$('#login-dialog').addEventListener('cancel', event => event.preventDefault());
 
 const refitTotals = () => ['#unit-price', '#order-total'].forEach(selector => fitText($(selector)));
 document.fonts?.ready.then(refitTotals);
