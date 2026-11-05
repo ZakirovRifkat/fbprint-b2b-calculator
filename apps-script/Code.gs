@@ -88,7 +88,7 @@ function doPost(e) {
     if (!withinLimit()) {
       return json({ error: { code: 'TOO_MANY_ORDERS', message: 'Слишком много заявок. Попробуйте через несколько минут' } });
     }
-    sendTelegram(message);
+    sendTelegram(message, orderFile(order));
     return json({ ok: true });
   } catch (error) {
     console.error(error);
@@ -155,7 +155,24 @@ function withinLimit() {
 
 // TELEGRAM_CHAT_ID — один номер чата или несколько через запятую: «123456789, 987654321».
 // Заявка считается отправленной, если дошла хотя бы до одного чата; сбои пишутся в журнал.
-function sendTelegram(text) {
+// Excel заявки, который собрал сайт: тот же файл, что клиент скачивает себе.
+// Принимаем только настоящий .xlsx (zip, начинается с «PK») до 500 КБ; имя файла задаём сами.
+// Возвращает Blob или null — без файла заявка всё равно отправляется.
+function orderFile(order) {
+  if (typeof order.file !== 'string' || !order.file || order.file.length > 700000) return null;
+  try {
+    const bytes = Utilities.base64Decode(order.file);
+    if (bytes.length > 500000 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) return null;
+    return Utilities.newBlob(bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', `${order.number}.xlsx`);
+  } catch (error) {
+    console.error(`Файл заявки не прочитан: ${error.message}`);
+    return null;
+  }
+}
+
+// Сообщение уходит в каждый чат, следом — файл заявки, если он есть.
+// Заявка считается отправленной, если сообщение дошло хотя бы до одного чата.
+function sendTelegram(text, file) {
   const properties = PropertiesService.getScriptProperties();
   const token = properties.getProperty('TELEGRAM_BOT_TOKEN');
   const chatIds = String(properties.getProperty('TELEGRAM_CHAT_ID') || '')
@@ -164,18 +181,28 @@ function sendTelegram(text) {
     .filter(Boolean);
   if (!token || !chatIds.length) throw new Error('Не заданы TELEGRAM_BOT_TOKEN или TELEGRAM_CHAT_ID');
 
-  const failures = chatIds.filter(chatId => {
-    const response = UrlFetchApp.fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+  const call = (method, chatId, payload) => {
+    const response = UrlFetchApp.fetch(`https://api.telegram.org/bot${token}/${method}`, Object.assign({
       method: 'post',
-      contentType: 'application/json',
-      payload: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
       muteHttpExceptions: true
-    });
-    if (response.getResponseCode() === 200) return false;
-    console.error(`Чат ${chatId}: Telegram ответил ${response.getResponseCode()}: ${response.getContentText()}`);
-    return true;
-  });
-  if (failures.length === chatIds.length) throw new Error('Telegram не принял заявку ни в один чат');
+    }, payload));
+    if (response.getResponseCode() === 200) return true;
+    console.error(`Чат ${chatId}, ${method}: Telegram ответил ${response.getResponseCode()}: ${response.getContentText()}`);
+    return false;
+  };
+
+  const delivered = chatIds.filter(chatId => call('sendMessage', chatId, {
+    contentType: 'application/json',
+    payload: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true })
+  }));
+  if (!delivered.length) throw new Error('Telegram не принял заявку ни в один чат');
+
+  // UrlFetchApp сам отправляет multipart/form-data, если в payload есть Blob.
+  if (file) {
+    delivered.forEach(chatId => call('sendDocument', chatId, {
+      payload: { chat_id: chatId, document: file, caption: `Excel заявки ${file.getName().replace(/\.xlsx$/, '')}` }
+    }));
+  }
 }
 
 // Напишите боту или добавьте его в группу, затем запустите — в журнале будет chat_id.

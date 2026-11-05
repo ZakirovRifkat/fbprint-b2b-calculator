@@ -832,10 +832,18 @@ async function submitOrder() {
     }))
   };
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20000);
   button.disabled = true;
   button.textContent = 'Отправляем…';
+  // Та же таблица, что скачивает клиент, — менеджер получит её файлом вместе с заявкой.
+  // Без файла заявка всё равно уйдёт: текст сообщения содержит все позиции.
+  try {
+    payload.file = await orderFileBase64();
+  } catch (reason) {
+    console.warn('Excel к заявке не приложен:', reason);
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
   error.hidden = true;
   try {
     const response = await fetch(apiUrl(), {
@@ -947,6 +955,15 @@ function addCompanySheet(book, company, lines) {
   sheet.getColumn('total').numFmt = '#,##0.00 "₽"';
   totalRow.font = { bold: true };
   totalRow.getCell('unitPrice').alignment = { horizontal: 'right' };
+}
+
+async function orderFileBase64() {
+  const bytes = new Uint8Array(await (await buildOrderWorkbook()).xlsx.writeBuffer());
+  let binary = '';
+  for (let start = 0; start < bytes.length; start += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(start, start + 0x8000));
+  }
+  return btoa(binary);
 }
 
 async function downloadExcel() {
