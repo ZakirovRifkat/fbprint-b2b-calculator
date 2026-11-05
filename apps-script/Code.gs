@@ -94,13 +94,11 @@ function doPost(e) {
 }
 
 // Возвращает текст сообщения или null, если заявка не похожа на настоящую.
+// Персональных данных в заявке нет: номер, компания и позиции.
 function orderMessage(order) {
-  const contact = order.contact || {};
-  const name = field(contact.name, 100);
-  const phone = field(contact.phone, 30);
-  const email = field(contact.email, 254);
+  const number = field(order.number, 20);
   const lines = Array.isArray(order.lines) ? order.lines : [];
-  if (!name || !phone || !lines.length || lines.length > 50) return null;
+  if (!/^FB-\d{4}-\d{4}$/.test(number) || !lines.length || lines.length > 50) return null;
 
   const items = lines.map((line, index) => {
     const quantity = Number(line.quantity);
@@ -120,10 +118,7 @@ function orderMessage(order) {
   if (items.includes(null) || !(Number(order.total) > 0)) return null;
 
   const text = [
-    'Новая заявка с калькулятора FB Print',
-    `Имя: ${name}`,
-    `Телефон: ${phone}`,
-    email ? `Почта: ${email}` : '',
+    `Новая заявка ${number} с калькулятора FB Print`,
     '',
     items.join('\n\n'),
     '',
@@ -155,20 +150,29 @@ function withinLimit() {
   return true;
 }
 
+// TELEGRAM_CHAT_ID — один номер чата или несколько через запятую: «123456789, 987654321».
+// Заявка считается отправленной, если дошла хотя бы до одного чата; сбои пишутся в журнал.
 function sendTelegram(text) {
   const properties = PropertiesService.getScriptProperties();
   const token = properties.getProperty('TELEGRAM_BOT_TOKEN');
-  const chatId = properties.getProperty('TELEGRAM_CHAT_ID');
-  if (!token || !chatId) throw new Error('Не заданы TELEGRAM_BOT_TOKEN или TELEGRAM_CHAT_ID');
-  const response = UrlFetchApp.fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
-    muteHttpExceptions: true
+  const chatIds = String(properties.getProperty('TELEGRAM_CHAT_ID') || '')
+    .split(',')
+    .map(chatId => chatId.trim())
+    .filter(Boolean);
+  if (!token || !chatIds.length) throw new Error('Не заданы TELEGRAM_BOT_TOKEN или TELEGRAM_CHAT_ID');
+
+  const failures = chatIds.filter(chatId => {
+    const response = UrlFetchApp.fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
+      muteHttpExceptions: true
+    });
+    if (response.getResponseCode() === 200) return false;
+    console.error(`Чат ${chatId}: Telegram ответил ${response.getResponseCode()}: ${response.getContentText()}`);
+    return true;
   });
-  if (response.getResponseCode() !== 200) {
-    throw new Error(`Telegram ответил ${response.getResponseCode()}: ${response.getContentText()}`);
-  }
+  if (failures.length === chatIds.length) throw new Error('Telegram не принял заявку ни в один чат');
 }
 
 // Напишите боту или добавьте его в группу, затем запустите — в журнале будет chat_id.

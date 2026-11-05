@@ -163,8 +163,8 @@ Content-Type: text/plain;charset=UTF-8
 ```json
 {
   "action": "order",
+  "number": "FB-0311-0042",
   "website": "",
-  "contact": { "name": "Иван", "phone": "+7 999 000-00-00", "email": "ivan@example.com" },
   "catalogVersion": "2026-11-03T08:30:00.000Z",
   "total": 9578,
   "lines": [
@@ -182,6 +182,8 @@ Content-Type: text/plain;charset=UTF-8
 }
 ```
 
+- `number` — номер заявки `FB-ДДММ-1234`, его создаёт фронтенд и показывает клиенту.
+- Персональных данных нет: имя, телефон и почта не передаются. Лишние поля Apps Script игнорирует.
 - `website` — поле-ловушка, у людей всегда пустое.
 - `condition` пустой, если тираж оптимальный.
 - Успех: `{ "ok": true }`.

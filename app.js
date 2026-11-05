@@ -785,17 +785,36 @@ function deliveryText() {
     : `До бесплатной доставки — ${money.format(roundMoney(freeDeliveryFrom - total))}. Сейчас доставка платная или самовывоз.`;
 }
 
+// Номер, по которому клиент и менеджер находят заявку: FB-ДДММ-1234.
+function orderNumber() {
+  const today = new Date();
+  const day = String(today.getDate()).padStart(2, '0');
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  return `FB-${day}${month}-${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`;
+}
+
+function openOrderDialog() {
+  const companies = [...new Set(order.map(line => line.company))].join(', ');
+  $('#order-summary').textContent = `${order.length} ${plural(order.length, 'позиция', 'позиции', 'позиций')} на сумму ${money.format(orderTotal())}. Компания: ${companies}.`;
+  $('#dialog-demo-note').hidden = Boolean(apiUrl());
+  $('#order-error').hidden = true;
+  $('#order-confirm').hidden = false;
+  $('#order-sent').hidden = true;
+  $('#order-dialog').showModal();
+}
+
 // Заявка уходит в Apps Script (doPost), а он пересылает её менеджеру в Telegram.
 // Тело — строка без заголовка Content-Type: так браузер не делает CORS-предзапрос.
+// Персональные данные не передаются: только номер, компания и позиции.
 async function submitOrder() {
-  const form = $('#contact-form');
+  const form = $('#order-form');
   const button = form.querySelector('[value=submit]');
-  const error = $('#contact-error');
-  const fields = new FormData(form);
+  const error = $('#order-error');
+  const number = orderNumber();
   const payload = {
     action: 'order',
-    website: fields.get('website'),
-    contact: { name: fields.get('name'), phone: fields.get('phone'), email: fields.get('email') },
+    number,
+    website: new FormData(form).get('website'),
     catalogVersion: data.version,
     total: orderTotal(),
     lines: order.map(line => ({
@@ -831,9 +850,10 @@ async function submitOrder() {
     }
     if (!result?.ok) throw new Error(result?.error?.message ?? 'Заявка не отправлена');
 
-    $('#contact-dialog').close();
-    form.reset();
-    toast('Заявка отправлена менеджеру.');
+    $('#order-number').textContent = number;
+    $('#order-confirm').hidden = true;
+    $('#order-sent').hidden = false;
+    $('#order-done').focus();
   } catch (reason) {
     const message = reason.name === 'AbortError' ? 'Сервер не ответил вовремя' : reason.message;
     error.textContent = `${message}. Если не получится, скачайте Excel и отправьте его менеджеру.`;
@@ -995,21 +1015,17 @@ $('#clear-order').addEventListener('click', () => {
   toast('Заявка очищена.');
 });
 $('#download-excel').addEventListener('click', downloadExcel);
-$('#submit-order').addEventListener('click', () => {
-  $('#dialog-demo-note').hidden = Boolean(apiUrl());
-  $('#contact-error').hidden = true;
-  $('#contact-dialog').showModal();
-});
-$('#close-contact-dialog').addEventListener('click', () => $('#contact-dialog').close());
-$('#contact-form').addEventListener('submit', event => {
+$('#submit-order').addEventListener('click', openOrderDialog);
+$('#close-order-dialog').addEventListener('click', () => $('#order-dialog').close());
+$('#order-done').addEventListener('click', () => $('#order-dialog').close());
+$('#order-form').addEventListener('submit', event => {
   if (event.submitter?.value !== 'submit') return;
   event.preventDefault();
   if (apiUrl()) {
     submitOrder();
     return;
   }
-  $('#contact-dialog').close();
-  $('#contact-form').reset();
+  $('#order-dialog').close();
   toast('Демонстрация: отправка менеджеру пока не подключена.');
 });
 $('#refresh-data').addEventListener('click', loadData);

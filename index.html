@@ -162,18 +162,24 @@
     </section>
   </main>
 
-  <dialog id="contact-dialog">
-    <form method="dialog" id="contact-form">
-      <button class="dialog-close" id="close-contact-dialog" type="button" aria-label="Закрыть">×</button>
-      <h2>Куда отправить расчёт?</h2>
-      <p>Оставьте контакты — менеджер получит состав заявки и свяжется с вами.</p>
-      <p class="dialog-note" id="dialog-demo-note">Демонстрационный режим: данные пока никуда не отправляются.</p>
-      <label>Имя<input name="name" required maxlength="100" autocomplete="name"></label>
-      <label>Телефон<input name="phone" required maxlength="30" inputmode="tel" autocomplete="tel" placeholder="+7 999 000-00-00"></label>
-      <label>Электронная почта<input name="email" type="email" maxlength="254" autocomplete="email"></label>
-      <label class="form-trap" aria-hidden="true">Сайт<input name="website" tabindex="-1" autocomplete="off"></label>
-      <p class="dialog-error" id="contact-error" role="alert" hidden></p>
-      <button class="primary-button primary-button--accent" value="submit">Отправить заявку</button>
+  <!-- Контакты не собираем: менеджер получает только состав заявки и её номер. -->
+  <dialog id="order-dialog">
+    <form method="dialog" id="order-form">
+      <button class="dialog-close" id="close-order-dialog" type="button" aria-label="Закрыть">×</button>
+      <div class="dialog-step" id="order-confirm">
+        <h2>Отправить заявку менеджеру?</h2>
+        <p id="order-summary"></p>
+        <p>Менеджер FB Print получит состав заявки и свяжется с вашей компанией. Контактные данные вводить не нужно.</p>
+        <p class="dialog-note" id="dialog-demo-note">Демонстрационный режим: заявка пока никуда не отправляется.</p>
+        <label class="form-trap" aria-hidden="true">Сайт<input name="website" tabindex="-1" autocomplete="off"></label>
+        <p class="dialog-error" id="order-error" role="alert" hidden></p>
+        <button class="primary-button primary-button--accent" value="submit">Отправить заявку</button>
+      </div>
+      <div class="dialog-step" id="order-sent" hidden>
+        <h2>Заявка отправлена</h2>
+        <p>Номер заявки: <strong id="order-number"></strong>. Назовите его менеджеру, если будете уточнять детали.</p>
+        <button class="primary-button primary-button--accent" id="order-done" type="button">Готово</button>
+      </div>
     </form>
   </dialog>
 
