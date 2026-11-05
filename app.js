@@ -696,6 +696,7 @@ function addLine() {
     company: company.name,
     sku: article.sku,
     name: article.name,
+    size: category.size,
     quantity: value,
     urgency: result.urgency,
     unitPrice: result.unitPrice,
@@ -882,34 +883,53 @@ function loadExcelJs() {
   return loadExcelJs.promise;
 }
 
-// .xlsx с рамками: компания, артикул, наименование, тираж, цена (стоимость позиции) и строка «Итого».
+// .xlsx с рамками: по листу на каждую компанию из заявки.
+// Колонки: срочность, артикул, наименование, тираж, стоимость за штуку, итого;
+// последняя — размер, скрыта: её можно развернуть в Excel при необходимости.
 async function buildOrderWorkbook() {
   const ExcelJS = await loadExcelJs();
   const book = new ExcelJS.Workbook();
-  const sheet = book.addWorksheet('Заявка', { views: [{ state: 'frozen', ySplit: 1 }] });
+  const companies = [...new Set(order.map(line => line.company))];
+  companies.forEach(company => addCompanySheet(book, company, order.filter(line => line.company === company)));
+  return book;
+}
+
+function addCompanySheet(book, company, lines) {
+  // Excel не разрешает в названии листа символы []:*?/\ и длину больше 31.
+  const sheet = book.addWorksheet(company.replace(/[[\]:*?/\\]/g, ' ').slice(0, 31), {
+    views: [{ state: 'frozen', ySplit: 1 }],
+    pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 }
+  });
   sheet.columns = [
-    { header: 'Компания', key: 'company', width: 16 },
+    { header: 'Срочность', key: 'urgency', width: 14 },
     { header: 'Артикул', key: 'sku', width: 11 },
     { header: 'Наименование', key: 'name', width: 60 },
     { header: 'Тираж', key: 'quantity', width: 12 },
-    { header: 'Цена', key: 'total', width: 16 }
+    { header: 'Стоимость за шт.', key: 'unitPrice', width: 17 },
+    { header: 'Итого', key: 'total', width: 16 },
+    { header: 'Размер', key: 'size', width: 14, hidden: true }
   ];
-  order.forEach(line => sheet.addRow({
-    company: line.company,
-    sku: line.sku,
-    name: line.name,
-    quantity: line.quantity,
-    total: line.total
-  }));
-  const lastLine = order.length + 1;
+  lines.forEach((line, index) => {
+    const row = index + 2;
+    sheet.addRow({
+      urgency: urgencyLabels[line.urgency],
+      sku: line.sku,
+      name: line.name,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      total: { formula: `ROUND(D${row}*E${row},2)`, result: line.total },
+      size: line.size ?? ''
+    });
+  });
+  const lastLine = lines.length + 1;
   const totalRow = sheet.addRow({
-    quantity: 'Итого',
-    total: { formula: `SUM(E2:E${lastLine})`, result: orderTotal() }
+    unitPrice: 'Итого',
+    total: { formula: `SUM(F2:F${lastLine})`, result: roundMoney(lines.reduce((sum, line) => sum + line.total, 0)) }
   });
 
   const border = { style: 'thin', color: { argb: 'FF9A97AD' } };
   sheet.eachRow(row => {
-    for (let column = 1; column <= 5; column++) {
+    for (let column = 1; column <= 7; column++) {
       const cell = row.getCell(column);
       cell.border = { top: border, left: border, bottom: border, right: border };
       cell.alignment = { vertical: 'top', wrapText: column === 3 };
@@ -918,13 +938,13 @@ async function buildOrderWorkbook() {
   sheet.getRow(1).eachCell(cell => {
     cell.font = { bold: true };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEDEBF3' } };
-    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
   });
   sheet.getColumn('quantity').numFmt = '#,##0';
+  sheet.getColumn('unitPrice').numFmt = '#,##0.00 "₽"';
   sheet.getColumn('total').numFmt = '#,##0.00 "₽"';
   totalRow.font = { bold: true };
-  totalRow.getCell('quantity').alignment = { horizontal: 'right' };
-  return book;
+  totalRow.getCell('unitPrice').alignment = { horizontal: 'right' };
 }
 
 async function downloadExcel() {
