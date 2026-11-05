@@ -81,14 +81,13 @@ function doPost(e) {
     }
     // Поле-ловушка скрыто от людей. Заполнил — значит бот: отвечаем «ок» и ничего не шлём.
     if (order.website) return json({ ok: true });
-    const message = orderMessage(order);
-    if (!message) {
+    if (!validOrder(order)) {
       return json({ error: { code: 'INVALID_ORDER', message: 'Заявка заполнена неверно' } });
     }
     if (!withinLimit()) {
       return json({ error: { code: 'TOO_MANY_ORDERS', message: 'Слишком много заявок. Попробуйте через несколько минут' } });
     }
-    sendTelegram(message, orderFile(order));
+    sendTelegram(orderMessage(order, verifyPrices(order)), orderFile(order));
     return json({ ok: true });
   } catch (error) {
     console.error(error);
@@ -96,39 +95,117 @@ function doPost(e) {
   }
 }
 
-// Возвращает текст сообщения или null, если заявка не похожа на настоящую.
-// Персональных данных в заявке нет: номер, компания и позиции.
-function orderMessage(order) {
-  const number = field(order.number, 20);
+// Похожа ли заявка на настоящую. Персональных данных в ней нет: номер, компания и позиции.
+function validOrder(order) {
   const lines = Array.isArray(order.lines) ? order.lines : [];
-  if (!/^FB-\d{4}-\d{4}$/.test(number) || !lines.length || lines.length > 50) return null;
-
-  const items = lines.map((line, index) => {
+  if (!/^FB-\d{4}-\d{4}$/.test(field(order.number, 20)) || !lines.length || lines.length > 50) return false;
+  if (!(Number(order.total) > 0)) return false;
+  return lines.every(line => {
     const quantity = Number(line.quantity);
-    const unitPrice = Number(line.unitPrice);
-    const total = Number(line.total);
-    const urgency = field(line.urgency, 20);
-    if (!Number.isInteger(quantity) || quantity <= 0 || !(unitPrice > 0) || !(total > 0) || !URGENCIES.includes(urgency)) {
-      return null;
-    }
-    return [
-      `${index + 1}. ${field(line.company, 100)} · ${field(line.sku, 50)}`,
-      field(line.name, 200),
-      `${integerText(quantity)} шт. · ${urgency} · ${moneyText(unitPrice)} = ${moneyText(total)}`,
-      field(line.condition, 60)
-    ].filter(Boolean).join('\n');
+    return Number.isInteger(quantity) && quantity > 0
+      && Number(line.unitPrice) > 0 && Number(line.total) > 0
+      && URGENCIES.includes(field(line.urgency, 20));
   });
-  if (items.includes(null) || !(Number(order.total) > 0)) return null;
+}
+
+function orderMessage(order, check) {
+  const lines = order.lines;
+  const items = lines.map((line, index) => [
+    `${index + 1}. ${field(line.company, 100)} · ${field(line.sku, 50)}`,
+    field(line.name, 200),
+    `${integerText(Number(line.quantity))} шт. · ${field(line.urgency, 20)} · ${moneyText(Number(line.unitPrice))} = ${moneyText(Number(line.total))}`,
+    field(line.condition, 60),
+    check.warnings[index]
+  ].filter(Boolean).join('\n'));
+
+  const flagged = check.warnings.filter(Boolean).length;
+  const verdict = check.error
+    ? `⚠ ${check.error}. Проверьте цены перед счётом.`
+    : flagged || check.totalWarning
+      ? '⚠ Цены не совпадают с таблицей FB Print — проверьте перед счётом.'
+      : '✅ Цены сверены с таблицей FB Print.';
 
   const text = [
-    `Новая заявка ${number} с калькулятора FB Print`,
+    `Новая заявка ${field(order.number, 20)} с калькулятора FB Print`,
+    flagged ? `⚠ ВНИМАНИЕ: расхождения с таблицей в ${flagged} из ${lines.length} поз.` : null,
     '',
     items.join('\n\n'),
     '',
     `Итого: ${moneyText(Number(order.total))}`,
-    'Цены рассчитаны на сайте — проверьте перед счётом.'
-  ].join('\n').replace(/\n{3,}/g, '\n\n');
+    check.totalWarning || null,
+    verdict
+  ].filter(line => line !== null).join('\n');
   return text.length > 4000 ? `${text.slice(0, 3990)}\n…` : text;
+}
+
+// Сверка цен с таблицей: клиент может подменить цены у себя в браузере, а скрипт — нет.
+// Правила те же, что на сайте (app.js, quote): от минимального тиража — цена по срочности,
+// в диапазоне сниженного тиража — цена сниженного тиража и только стандартный срок.
+// Скрипт ничего не пересчитывает в заявке, только помечает расхождения для менеджера.
+const URGENCY_KEYS = { 'Стандартный': 'standard', 'Срочный': 'urgent', 'Экстренный': 'emergency' };
+
+function verifyPrices(order) {
+  let catalog;
+  try {
+    catalog = readCatalog();
+  } catch (error) {
+    console.error(error);
+    return { error: `Цены не проверены: ${error.message}`, warnings: order.lines.map(() => ''), totalWarning: '' };
+  }
+  const companyIds = new Map(catalog.companies.map(company => [company.name, company.id]));
+  const categories = new Map(catalog.categories.map(category => [category.id, category]));
+  const warnings = order.lines.map(line => lineWarnings(line, catalog.articles, companyIds, categories));
+
+  const linesTotal = roundMoney(order.lines.reduce((sum, line) => sum + Number(line.total), 0));
+  const totalWarning = Math.abs(linesTotal - roundMoney(Number(order.total))) > 0.005
+    ? `⚠ «Итого» не равно сумме позиций: по позициям ${moneyText(linesTotal)}`
+    : '';
+  return { error: null, warnings, totalWarning };
+}
+
+function lineWarnings(line, articles, companyIds, categories) {
+  const companyId = companyIds.get(field(line.company, 100));
+  const sku = field(line.sku, 50);
+  const article = articles.find(item => item.companyId === companyId && item.sku === sku);
+  if (!article) return '⚠ Такого артикула нет в каталоге этой компании';
+  const category = categories.get(article.categoryId);
+  if (!category) return '⚠ У артикула в таблице не заполнена категория';
+
+  const quantity = Number(line.quantity);
+  const urgency = URGENCY_KEYS[field(line.urgency, 20)];
+  const minimum = toNumber(category.minimumQuantity);
+  const reduced = category.reducedRun;
+  let expected;
+  if (quantity >= minimum) {
+    expected = category.prices[urgency];
+  } else if (!reduced || quantity < toNumber(reduced.minQuantity) || quantity > toNumber(reduced.maxQuantity)) {
+    return `⚠ Тираж меньше минимального заказа по таблице`;
+  } else if (urgency !== 'standard') {
+    return `⚠ ${field(line.urgency, 20)} заказ по таблице — только от ${integerText(minimum)} шт.`;
+  } else {
+    expected = reduced.price;
+  }
+  expected = roundMoney(toNumber(expected));
+
+  const unitPrice = roundMoney(Number(line.unitPrice));
+  const problems = [];
+  if (!(expected > 0)) problems.push('⚠ В таблице не заполнена цена для этого срока');
+  else if (Math.abs(unitPrice - expected) > 0.005) problems.push(`⚠ Цена в заявке ${moneyText(unitPrice)}, по таблице ${moneyText(expected)}`);
+  if (Math.abs(roundMoney(quantity * unitPrice) - roundMoney(Number(line.total))) > 0.005) {
+    problems.push(`⚠ Сумма не равна тираж × цена: должно быть ${moneyText(roundMoney(quantity * unitPrice))}`);
+  }
+  return problems.join('\n');
+}
+
+// Как roundMoney в app.js: до копеек, без хвостов двоичной арифметики (1,425 × 100 = 142,4999…).
+function roundMoney(value) {
+  return Math.round(Number((value * 100).toFixed(6))) / 100;
+}
+
+// Значение ячейки как число: getValues() отдаёт числа, но цену могли ввести текстом «1,20 ₽».
+function toNumber(value) {
+  if (typeof value === 'number') return value;
+  return Number(String(value).replace(/\s/g, '').replace(/[^\d,.-]/g, '').replace(',', '.'));
 }
 
 function field(value, maxLength) {
