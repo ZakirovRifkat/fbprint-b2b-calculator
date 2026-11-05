@@ -4,11 +4,13 @@
  * POST {action: 'order'} — пересылает заявку менеджеру в Telegram.
  * Таблицу не изменяет и ничего не рассчитывает. Проверка каталога — в app.js.
  *
+ * Скрипт создаётся из самой таблицы («Расширения» → «Apps Script») и читает только её:
+ * право spreadsheets.currentonly не даёт доступа к другим таблицам владельца.
+ *
  * Свойства скрипта («Настройки проекта» → «Свойства скрипта»):
- * TELEGRAM_BOT_TOKEN — токен от @BotFather, TELEGRAM_CHAT_ID — чат менеджера.
+ * TELEGRAM_BOT_TOKEN — токен от @BotFather, TELEGRAM_CHAT_ID — чаты менеджеров через запятую.
  */
 
-const SPREADSHEET_ID = '1tT1gWfyTSa0A3kOdsCHLALh7NPYB1797SvND44_7gJg';
 const ORDER_LIMIT = { count: 20, seconds: 600 };
 const URGENCIES = ['Стандартный', 'Срочный', 'Экстренный'];
 
@@ -31,7 +33,8 @@ function doGet(e) {
 }
 
 function readCatalog() {
-  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  if (!spreadsheet) throw new Error('скрипт не привязан к таблице — создайте его через «Расширения» → «Apps Script» в самой таблице');
 
   // «Категории»: строка 1 — заголовки, примечания под таблицей без номера в колонке A.
   const categories = rows(spreadsheet, 'Категории', 1)
@@ -176,13 +179,39 @@ function sendTelegram(text) {
 }
 
 // Напишите боту или добавьте его в группу, затем запустите — в журнале будет chat_id.
+// Telegram хранит сообщения для бота только 24 часа, поэтому пишите боту прямо перед запуском.
 function findChatId() {
   const token = PropertiesService.getScriptProperties().getProperty('TELEGRAM_BOT_TOKEN');
-  const response = UrlFetchApp.fetch(`https://api.telegram.org/bot${token}/getUpdates`);
-  JSON.parse(response.getContentText()).result.forEach(update => {
+  if (!token) {
+    console.log('Сначала добавьте свойство TELEGRAM_BOT_TOKEN.');
+    return;
+  }
+  const call = method => JSON.parse(UrlFetchApp.fetch(`https://api.telegram.org/bot${token}/${method}`, { muteHttpExceptions: true }).getContentText());
+
+  const bot = call('getMe');
+  if (!bot.ok) {
+    console.log(`Telegram не принял токен: ${bot.description}. Проверьте TELEGRAM_BOT_TOKEN.`);
+    return;
+  }
+  console.log(`Бот: @${bot.result.username}`);
+
+  const webhook = call('getWebhookInfo');
+  if (webhook.ok && webhook.result.url) {
+    console.log(`У бота настроен webhook (${webhook.result.url}) — из-за него сообщения сюда не попадают. Узнайте chat_id через @userinfobot.`);
+    return;
+  }
+
+  const chats = new Map();
+  (call('getUpdates').result || []).forEach(update => {
     const chat = (update.message || update.my_chat_member || {}).chat;
-    if (chat) console.log(`chat_id: ${chat.id} — ${chat.title || chat.username || chat.first_name}`);
+    if (chat) chats.set(chat.id, chat.title || [chat.first_name, chat.last_name].filter(Boolean).join(' ') || chat.username);
   });
+  if (!chats.size) {
+    console.log(`Новых сообщений нет. Каждый получатель: откройте @${bot.result.username}, отправьте любое сообщение, затем запустите функцию снова.`);
+    return;
+  }
+  chats.forEach((name, id) => console.log(`chat_id: ${id} — ${name}`));
+  console.log(`Для TELEGRAM_CHAT_ID: ${[...chats.keys()].join(', ')}`);
 }
 
 function rows(spreadsheet, sheetName, headerRows) {

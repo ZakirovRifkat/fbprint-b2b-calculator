@@ -189,7 +189,9 @@ function normalizeCatalog(raw) {
     };
   });
 
-  const articles = raw.articles.map(item => {
+  // Артикул без категории — ещё не готов к продаже: не показываем его и не считаем ошибкой.
+  const readyArticles = raw.articles.filter(item => String(item?.categoryId ?? '').trim());
+  const articles = readyArticles.map(item => {
     const sku = String(item?.sku ?? '').trim();
     const name = String(item?.name ?? '').trim();
     const company = companyNames.get(String(item?.companyId ?? '').trim()) ?? item?.companyId;
