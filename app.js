@@ -403,6 +403,7 @@ async function loadData() {
     loadedAt = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
     setDataStatus('live', `Данные актуальны · ${loadedAt}`);
     showCatalogError('');
+    loadStatuses();
   } catch (error) {
     // Запрос отменён более новым нажатием «Обновить» — ошибки нет.
     if (controller !== loadController) return;
@@ -886,6 +887,9 @@ function deliveryText() {
 // Отправленные заявки клиента хранятся в его браузере (localStorage), чтобы номер не терялся.
 // Позже их можно будет вести в таблице; пока это только память конкретного браузера.
 const sentOrdersKey = 'fbprint-sent-orders';
+const statusLabels = { work: 'В работе', shipped: 'Отгружено' };
+let ordersFilter = 'all';
+let statusesController = null;
 const sentOrdersLimit = 50;
 const dateTime = new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
@@ -899,7 +903,10 @@ function sentOrders() {
 }
 
 function saveSentOrder(entry) {
-  const list = [entry, ...sentOrders()].slice(0, sentOrdersLimit);
+  return storeSentOrders([entry, ...sentOrders()].slice(0, sentOrdersLimit));
+}
+
+function storeSentOrders(list) {
   try {
     localStorage.setItem(sentOrdersKey, JSON.stringify(list));
   } catch {
@@ -908,17 +915,30 @@ function saveSentOrder(entry) {
   return list;
 }
 
+// «Отгружено» ставит менеджер в таблице (лист «Заявки», колонка K); всё остальное — «В работе».
+function orderStatus(entry) {
+  return entry.status === 'shipped' ? 'shipped' : 'work';
+}
+
 // Вкладка «Заявки»: все сохранённые заявки, новые сверху. Позиции раскрываются по клику.
 function renderSentOrders(list = sentOrders()) {
   const root = $('#sent-orders-list');
   root.innerHTML = '';
-  list.forEach(entry => {
+  const counts = { all: list.length, work: 0, shipped: 0 };
+  list.forEach(entry => { counts[orderStatus(entry)] += 1; });
+  Object.entries(counts).forEach(([filter, count]) => { $(`#filter-${filter}`).textContent = count; });
+  document.querySelectorAll('.orders-filter button').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.dataset.filter === ordersFilter));
+  });
+  const shown = list.filter(entry => ordersFilter === 'all' || orderStatus(entry) === ordersFilter);
+  shown.forEach(entry => {
     const item = document.createElement('li');
     const details = document.createElement('details');
     const summary = document.createElement('summary');
     summary.append(
       cell('strong', entry.number),
       cell('span', `${dateTime.format(new Date(entry.sentAt))} · ${entry.count} ${plural(entry.count, 'позиция', 'позиции', 'позиций')}`),
+      cell('em', statusLabels[orderStatus(entry)], orderStatus(entry)),
       cell('b', money.format(entry.total))
     );
     summary.insertAdjacentHTML('beforeend', '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>');
@@ -927,7 +947,10 @@ function renderSentOrders(list = sentOrders()) {
     root.append(item);
   });
   $('#orders-empty').hidden = list.length > 0;
-  root.hidden = !list.length;
+  $('#orders-toolbar').hidden = !list.length;
+  root.hidden = !shown.length;
+  $('#orders-none').hidden = !list.length || shown.length > 0;
+  $('#orders-none').textContent = ordersFilter === 'shipped' ? 'Отгруженных заявок пока нет.' : 'Все заявки отгружены.';
   $('#orders-count').textContent = list.length;
   $('#orders-count').hidden = !list.length;
 }
@@ -957,6 +980,41 @@ function orderLinesTable(lines) {
   });
   table.append(body);
   return table;
+}
+
+// Статусы берутся из таблицы: сайт отправляет номера своих заявок, скрипт отвечает по ним.
+// Ответ сохраняется в истории заявок, поэтому без связи виден последний известный статус.
+async function loadStatuses() {
+  const list = sentOrders();
+  const password = accessPassword();
+  if (!apiUrl() || !password || !list.length) return;
+  statusesController?.abort();
+  const controller = new AbortController();
+  statusesController = controller;
+  const timeout = setTimeout(() => controller.abort(), Number(window.FBPRINT_CONFIG?.requestTimeoutMs) || 10000);
+  $('#orders-sync').textContent = 'Обновляем статусы…';
+  try {
+    const response = await fetch(apiUrl(), {
+      method: 'POST',
+      body: JSON.stringify({ action: 'statuses', password, numbers: list.map(entry => entry.number) }),
+      redirect: 'follow',
+      cache: 'no-store',
+      signal: controller.signal
+    });
+    const payload = await response.json();
+    if (!payload?.statuses) throw new Error(payload?.error?.message ?? 'нет ответа');
+    // Пока шёл запрос, могла уйти новая заявка: берём свежий список и меняем только статусы.
+    renderSentOrders(storeSentOrders(sentOrders().map(entry => (
+      entry.number in payload.statuses ? { ...entry, status: payload.statuses[entry.number] } : entry
+    ))));
+    $('#orders-sync').textContent = `Статусы обновлены · ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
+  } catch (error) {
+    if (controller !== statusesController) return;
+    $('#orders-sync').textContent = 'Не удалось обновить статусы — показаны последние известные.';
+    console.warn('Статусы заявок не обновлены:', error);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 // Вкладки в шапке. Раздел задаёт адрес: #orders — заявки, всё остальное — расчёт.
@@ -1278,5 +1336,10 @@ showView();
 window.addEventListener('hashchange', () => {
   showView();
   window.scrollTo(0, 0);
+  if (location.hash === '#orders') loadStatuses();
 });
+document.querySelectorAll('.orders-filter button').forEach(button => button.addEventListener('click', () => {
+  ordersFilter = button.dataset.filter;
+  renderSentOrders();
+}));
 loadData();

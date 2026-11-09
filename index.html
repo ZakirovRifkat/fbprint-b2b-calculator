@@ -177,6 +177,15 @@
       <h1 id="orders-title">Заявки</h1>
       <p>Заявки, отправленные из этого браузера.</p>
     </div>
+    <div class="orders-toolbar" id="orders-toolbar" hidden>
+      <div class="orders-filter" role="group" aria-label="Показать заявки">
+        <button type="button" data-filter="all" aria-pressed="true">Все <span id="filter-all"></span></button>
+        <button type="button" data-filter="work" aria-pressed="false">В работе <span id="filter-work"></span></button>
+        <button type="button" data-filter="shipped" aria-pressed="false">Отгружены <span id="filter-shipped"></span></button>
+      </div>
+      <p class="orders-sync" id="orders-sync" aria-live="polite"></p>
+    </div>
+    <p class="orders-none" id="orders-none" hidden></p>
     <div class="orders-empty" id="orders-empty">
       <strong>Пока нет отправленных заявок</strong>
       <p>Соберите заявку на вкладке «Расчёт» и отправьте её менеджеру — она появится здесь с номером.</p>

@@ -2,6 +2,7 @@
  * FB Print — API B2B-калькулятора.
  * POST {action: 'catalog', password} — читает таблицу и отдаёт каталог (API_CONTRACT.md).
  * POST {action: 'order', password, …} — пересылает заявку менеджеру в Telegram и дописывает её на лист «Заявки».
+ * POST {action: 'statuses', password, numbers} — статусы этих заявок с листа «Заявки» (колонка E).
  * Без верного пароля не отдаёт ничего. Другие листы не изменяет. Расчёт — в app.js.
  *
  * Скрипт создаётся из самой таблицы («Расширения» → «Apps Script») и работает только с ней:
@@ -15,6 +16,8 @@
 
 const ORDER_LIMIT = { count: 20, seconds: 600 };
 const ORDERS_SHEET = 'Заявки';
+const SHIPPED = 'Отгружено';
+const TIME_ZONE = 'Europe/Moscow';
 const URGENCIES = ['Стандартный', 'Срочный', 'Экстренный'];
 
 // Компания определяется листом, а не колонкой «Площадка».
@@ -96,6 +99,14 @@ function doPost(e) {
       return json({ error: { code: 'CATALOG_READ_FAILED', message: `Не удалось прочитать таблицу: ${error.message}` } });
     }
   }
+  if (order.action === 'statuses') {
+    try {
+      return json({ statuses: readStatuses(order.numbers) });
+    } catch (error) {
+      console.error(error);
+      return json({ error: { code: 'STATUSES_READ_FAILED', message: `Не удалось прочитать статусы заявок: ${error.message}` } });
+    }
+  }
   try {
     if (order.action !== 'order') {
       return json({ error: { code: 'UNKNOWN_ACTION', message: 'Неизвестное действие' } });
@@ -114,7 +125,7 @@ function doPost(e) {
     // Запись в таблицу — после Telegram: на листе только заявки, которые дошли до менеджера.
     // Если запись не удалась, заявка всё равно отправлена: менеджер уже получил её в Telegram.
     try {
-      saveOrderRows(order);
+      saveOrderRow(order);
     } catch (error) {
       console.error(`Заявка ${order.number} не записана на лист «${ORDERS_SHEET}»: ${error.message}`);
     }
@@ -156,7 +167,7 @@ function orderMessage(order, check) {
       : '✅ Цены сверены с таблицей FB Print.';
 
   const text = [
-    `Новая заявка ${field(order.number, 20)} с калькулятора FB Print`,
+    `Новая заявка ${field(order.number, 30)} с калькулятора FB Print`,
     flagged ? `⚠ ВНИМАНИЕ: расхождения с таблицей в ${flagged} из ${lines.length} поз.` : null,
     '',
     items.join('\n\n'),
@@ -252,7 +263,8 @@ function moneyText(value) {
 }
 
 // Общий лимит на всех: защищает чат менеджера от потока спама.
-// Сквозная нумерация: FB-0001, FB-0002… Счётчик — свойство ORDER_COUNTER.
+// Сквозная нумерация с датой: «FB-0002 от 09.11.2026». Счётчик — свойство ORDER_COUNTER,
+// по дням он не сбрасывается: номер уникален и без даты, дата — для удобства менеджера.
 // Блокировка не даёт двум одновременным заявкам получить один номер.
 // Номер расходуется, даже если Telegram потом не принял заявку, — пропуски допустимы, повторы нет.
 function nextOrderNumber() {
@@ -262,7 +274,7 @@ function nextOrderNumber() {
     const properties = PropertiesService.getScriptProperties();
     const next = (Number(properties.getProperty('ORDER_COUNTER')) || 0) + 1;
     properties.setProperty('ORDER_COUNTER', String(next));
-    return `FB-${String(next).padStart(4, '0')}`;
+    return `FB-${String(next).padStart(4, '0')} от ${Utilities.formatDate(new Date(), TIME_ZONE, 'dd.MM.yyyy')}`;
   } finally {
     lock.releaseLock();
   }
@@ -364,30 +376,19 @@ function findChatId() {
   console.log(`Для TELEGRAM_CHAT_ID: ${[...chats.keys()].join(', ')}`);
 }
 
-// Лист «Заявки»: одна строка — одна позиция. Колонки A–J: номер, дата и время, компания, арт.,
-// наименование, срок, тираж, цена за шт., сумма, итого по заявке. Строка 1 — заголовки.
-// Значения — из заявки клиента, как в Telegram; расхождения с таблицей видны в сообщении менеджеру.
-// Блокировка не даёт строкам двух одновременных заявок перемешаться.
-function saveOrderRows(order) {
+// Лист «Заявки»: одна строка — одна заявка. Колонки A–D: номер, дата и время, компания, итого;
+// E — статус, его ставит менеджер. Строка 1 — заголовки. Позиции заявки — в Telegram и в Excel.
+// Значения — из заявки клиента; расхождения с таблицей цен видны в сообщении менеджеру.
+// Блокировка не даёт двум одновременным заявкам записаться в одну строку.
+function saveOrderRow(order) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ORDERS_SHEET);
   if (!sheet) throw new Error(`нет листа «${ORDERS_SHEET}»`);
-  const sentAt = new Date();
-  const values = order.lines.map(line => [
-    field(order.number, 20),
-    sentAt,
-    cellText(field(line.company, 100)),
-    `'${field(line.sku, 50)}`, // апостроф: артикул остаётся текстом, ведущие нули не теряются
-    cellText(field(line.name, 200)),
-    field(line.urgency, 20),
-    Number(line.quantity),
-    Number(line.unitPrice),
-    Number(line.total),
-    Number(order.total)
-  ]);
+  const companies = [...new Set(order.lines.map(line => field(line.company, 100)).filter(Boolean))].join(', ');
+  const values = [[field(order.number, 30), new Date(), cellText(companies), Number(order.total)]];
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    sheet.getRange(sheet.getLastRow() + 1, 1, values.length, values[0].length).setValues(values);
+    sheet.getRange(sheet.getLastRow() + 1, 1, 1, values[0].length).setValues(values);
   } finally {
     lock.releaseLock();
   }
@@ -397,6 +398,47 @@ function saveOrderRows(order) {
 // Апостроф в начале оставляет его обычным текстом и в ячейке не виден.
 function cellText(value) {
   return /^[=+\-@]/.test(value) ? `'${value}` : value;
+}
+
+// Статусы заявок клиента: сайт присылает номера из своей истории, скрипт отвечает только по ним —
+// чужие заявки так не увидеть. Заявка отгружена, если в её строке колонка E = «Отгружено».
+function readStatuses(numbers) {
+  const wanted = new Set((Array.isArray(numbers) ? numbers : []).slice(0, 100).map(number => field(number, 30)).filter(Boolean));
+  const statuses = {};
+  wanted.forEach(number => { statuses[number] = ''; });
+  if (!wanted.size) return statuses;
+  rows(SpreadsheetApp.getActiveSpreadsheet(), ORDERS_SHEET, 1).forEach(row => {
+    const number = text(row[0]);
+    if (wanted.has(number) && text(row[4]) === SHIPPED) statuses[number] = 'shipped';
+  });
+  return statuses;
+}
+
+// Запустите один раз в редакторе: колонка E «Статус» на листе «Заявки» — пусто или «Отгружено»,
+// а строка отгруженной заявки подсвечивается зелёным. Данные в колонках A–D не трогает.
+function setupOrdersSheet() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ORDERS_SHEET);
+  if (!sheet) throw new Error(`нет листа «${ORDERS_SHEET}»`);
+  sheet.getRange('D1').copyTo(sheet.getRange('E1'), SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false);
+  sheet.getRange('E1').setValue('Статус');
+  sheet.setColumnWidth(5, 150);
+  const status = sheet.getRange('E2:E');
+  status.setDataValidation(SpreadsheetApp.newDataValidation()
+    .requireValueInList([SHIPPED], true)
+    .setAllowInvalid(false)
+    .build());
+  const shipped = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied(`=$E2="${SHIPPED}"`)
+    .setBackground('#d9ead3')
+    .setRanges([sheet.getRange('A2:E')])
+    .build();
+  sheet.setConditionalFormatRules(sheet.getConditionalFormatRules()
+    .filter(rule => !String((rule.getBooleanCondition() || { getCriteriaValues: () => [] }).getCriteriaValues()[0] || '').includes(`"${SHIPPED}"`))
+    .concat(shipped));
+  const filter = sheet.getFilter();
+  if (filter) filter.remove();
+  sheet.getRange('A1:E').createFilter();
+  console.log('Лист «Заявки» настроен: колонка «Статус», выбор «Отгружено», зелёные строки.');
 }
 
 function rows(spreadsheet, sheetName, headerRows) {
