@@ -1,18 +1,20 @@
 /**
  * FB Print — API B2B-калькулятора.
  * POST {action: 'catalog', password} — читает таблицу и отдаёт каталог (API_CONTRACT.md).
- * POST {action: 'order', password, …} — пересылает заявку менеджеру в Telegram.
- * Без верного пароля не отдаёт ничего. Таблицу не изменяет. Расчёт — в app.js.
+ * POST {action: 'order', password, …} — пересылает заявку менеджеру в Telegram и дописывает её на лист «Заявки».
+ * Без верного пароля не отдаёт ничего. Другие листы не изменяет. Расчёт — в app.js.
  *
- * Скрипт создаётся из самой таблицы («Расширения» → «Apps Script») и читает только её:
+ * Скрипт создаётся из самой таблицы («Расширения» → «Apps Script») и работает только с ней:
  * право spreadsheets.currentonly не даёт доступа к другим таблицам владельца.
  *
  * Свойства скрипта («Настройки проекта» → «Свойства скрипта»):
  * ACCESS_PASSWORD — пароль для входа на сайт; пока он не задан, скрипт никому ничего не отдаёт;
+ * ORDER_COUNTER — номер последней заявки; скрипт ведёт его сам, вручную менять не нужно;
  * TELEGRAM_BOT_TOKEN — токен от @BotFather, TELEGRAM_CHAT_ID — чаты менеджеров через запятую.
  */
 
 const ORDER_LIMIT = { count: 20, seconds: 600 };
+const ORDERS_SHEET = 'Заявки';
 const URGENCIES = ['Стандартный', 'Срочный', 'Экстренный'];
 
 // Компания определяется листом, а не колонкой «Площадка».
@@ -106,8 +108,17 @@ function doPost(e) {
     if (!withinLimit()) {
       return json({ error: { code: 'TOO_MANY_ORDERS', message: 'Слишком много заявок. Попробуйте через несколько минут' } });
     }
+    // Номер выдаёт скрипт, а не браузер: так номера идут по порядку и не повторяются.
+    order.number = nextOrderNumber();
     sendTelegram(orderMessage(order, verifyPrices(order)), orderFile(order));
-    return json({ ok: true });
+    // Запись в таблицу — после Telegram: на листе только заявки, которые дошли до менеджера.
+    // Если запись не удалась, заявка всё равно отправлена: менеджер уже получил её в Telegram.
+    try {
+      saveOrderRows(order);
+    } catch (error) {
+      console.error(`Заявка ${order.number} не записана на лист «${ORDERS_SHEET}»: ${error.message}`);
+    }
+    return json({ ok: true, number: order.number });
   } catch (error) {
     console.error(error);
     return json({ error: { code: 'ORDER_SEND_FAILED', message: 'Не удалось отправить заявку' } });
@@ -117,7 +128,7 @@ function doPost(e) {
 // Похожа ли заявка на настоящую. Персональных данных в ней нет: номер, компания и позиции.
 function validOrder(order) {
   const lines = Array.isArray(order.lines) ? order.lines : [];
-  if (!/^FB-\d{4}-\d{4}$/.test(field(order.number, 20)) || !lines.length || lines.length > 50) return false;
+  if (!lines.length || lines.length > 50) return false;
   if (!(Number(order.total) > 0)) return false;
   return lines.every(line => {
     const quantity = Number(line.quantity);
@@ -241,6 +252,22 @@ function moneyText(value) {
 }
 
 // Общий лимит на всех: защищает чат менеджера от потока спама.
+// Сквозная нумерация: FB-0001, FB-0002… Счётчик — свойство ORDER_COUNTER.
+// Блокировка не даёт двум одновременным заявкам получить один номер.
+// Номер расходуется, даже если Telegram потом не принял заявку, — пропуски допустимы, повторы нет.
+function nextOrderNumber() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const properties = PropertiesService.getScriptProperties();
+    const next = (Number(properties.getProperty('ORDER_COUNTER')) || 0) + 1;
+    properties.setProperty('ORDER_COUNTER', String(next));
+    return `FB-${String(next).padStart(4, '0')}`;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function withinLimit() {
   const cache = CacheService.getScriptCache();
   const count = Number(cache.get('orders') || 0);
@@ -335,6 +362,41 @@ function findChatId() {
   }
   chats.forEach((name, id) => console.log(`chat_id: ${id} — ${name}`));
   console.log(`Для TELEGRAM_CHAT_ID: ${[...chats.keys()].join(', ')}`);
+}
+
+// Лист «Заявки»: одна строка — одна позиция. Колонки A–J: номер, дата и время, компания, арт.,
+// наименование, срок, тираж, цена за шт., сумма, итого по заявке. Строка 1 — заголовки.
+// Значения — из заявки клиента, как в Telegram; расхождения с таблицей видны в сообщении менеджеру.
+// Блокировка не даёт строкам двух одновременных заявок перемешаться.
+function saveOrderRows(order) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(ORDERS_SHEET);
+  if (!sheet) throw new Error(`нет листа «${ORDERS_SHEET}»`);
+  const sentAt = new Date();
+  const values = order.lines.map(line => [
+    field(order.number, 20),
+    sentAt,
+    cellText(field(line.company, 100)),
+    `'${field(line.sku, 50)}`, // апостроф: артикул остаётся текстом, ведущие нули не теряются
+    cellText(field(line.name, 200)),
+    field(line.urgency, 20),
+    Number(line.quantity),
+    Number(line.unitPrice),
+    Number(line.total),
+    Number(order.total)
+  ]);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    sheet.getRange(sheet.getLastRow() + 1, 1, values.length, values[0].length).setValues(values);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Текст из заявки, который начинается с «=», «+», «-» или «@», таблица приняла бы за формулу.
+// Апостроф в начале оставляет его обычным текстом и в ячейке не виден.
+function cellText(value) {
+  return /^[=+\-@]/.test(value) ? `'${value}` : value;
 }
 
 function rows(spreadsheet, sheetName, headerRows) {

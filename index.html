@@ -17,6 +17,10 @@
     <a class="brand" href="#top" aria-label="FB-print, на главную">
       <img src="assets/logo-full.svg" alt="FB-print" width="120" height="95">
     </a>
+    <nav class="view-tabs" aria-label="Разделы">
+      <a href="#calc" data-view="calc" aria-current="page">Расчёт</a>
+      <a href="#orders" data-view="orders">Заявки <span class="tab-count" id="orders-count" hidden></span></a>
+    </nav>
     <div class="header-meta" data-state="demo" aria-busy="false">
       <span class="sync-dot" aria-hidden="true"></span>
       <span id="data-status" aria-live="polite">Демо-данные</span>
@@ -165,6 +169,20 @@
         </div>
       </aside>
     </section>
+  </main>
+
+  <!-- Вкладка «Заявки»: заявки, отправленные из этого браузера. Хранятся в localStorage. -->
+  <main class="orders-view" id="orders-view" aria-labelledby="orders-title" hidden>
+    <div class="orders-head">
+      <h1 id="orders-title">Заявки</h1>
+      <p>Заявки, отправленные из этого браузера.</p>
+    </div>
+    <div class="orders-empty" id="orders-empty">
+      <strong>Пока нет отправленных заявок</strong>
+      <p>Соберите заявку на вкладке «Расчёт» и отправьте её менеджеру — она появится здесь с номером.</p>
+      <a class="primary-button" href="#calc">Перейти к расчёту</a>
+    </div>
+    <ol class="sent-orders" id="sent-orders-list"></ol>
   </main>
 
   <dialog id="login-dialog">

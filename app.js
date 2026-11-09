@@ -883,12 +883,93 @@ function deliveryText() {
     : `До бесплатной доставки — ${money.format(roundMoney(freeDeliveryFrom - total))}. Сейчас доставка платная или самовывоз.`;
 }
 
-// Номер, по которому клиент и менеджер находят заявку: FB-ДДММ-1234.
-function orderNumber() {
-  const today = new Date();
-  const day = String(today.getDate()).padStart(2, '0');
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  return `FB-${day}${month}-${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`;
+// Отправленные заявки клиента хранятся в его браузере (localStorage), чтобы номер не терялся.
+// Позже их можно будет вести в таблице; пока это только память конкретного браузера.
+const sentOrdersKey = 'fbprint-sent-orders';
+const sentOrdersLimit = 50;
+const dateTime = new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+function sentOrders() {
+  try {
+    const list = JSON.parse(localStorage.getItem(sentOrdersKey) ?? '[]');
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSentOrder(entry) {
+  const list = [entry, ...sentOrders()].slice(0, sentOrdersLimit);
+  try {
+    localStorage.setItem(sentOrdersKey, JSON.stringify(list));
+  } catch {
+    // Хранилище недоступно — номер всё равно виден в окне и на странице до перезагрузки.
+  }
+  return list;
+}
+
+// Вкладка «Заявки»: все сохранённые заявки, новые сверху. Позиции раскрываются по клику.
+function renderSentOrders(list = sentOrders()) {
+  const root = $('#sent-orders-list');
+  root.innerHTML = '';
+  list.forEach(entry => {
+    const item = document.createElement('li');
+    const details = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.append(
+      cell('strong', entry.number),
+      cell('span', `${dateTime.format(new Date(entry.sentAt))} · ${entry.count} ${plural(entry.count, 'позиция', 'позиции', 'позиций')}`),
+      cell('b', money.format(entry.total))
+    );
+    summary.insertAdjacentHTML('beforeend', '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>');
+    details.append(summary, orderLinesTable(entry.lines ?? []));
+    item.append(details);
+    root.append(item);
+  });
+  $('#orders-empty').hidden = list.length > 0;
+  root.hidden = !list.length;
+  $('#orders-count').textContent = list.length;
+  $('#orders-count').hidden = !list.length;
+}
+
+function cell(tag, text, name) {
+  const node = document.createElement(tag);
+  node.textContent = text;
+  if (name) node.dataset.cell = name;
+  return node;
+}
+
+function orderLinesTable(lines) {
+  const table = document.createElement('table');
+  table.innerHTML = '<thead><tr><th>Артикул</th><th>Наименование</th><th class="num">Тираж</th><th>Срок</th><th class="num">Цена за шт.</th><th class="num">Сумма</th></tr></thead>';
+  const body = document.createElement('tbody');
+  lines.forEach(line => {
+    const row = document.createElement('tr');
+    const sku = cell('td', line.sku, 'sku');
+    sku.append(cell('small', line.company));
+    const quantity = cell('td', `${integer.format(line.quantity)} шт.`, 'quantity');
+    const price = cell('td', `${money.format(line.unitPrice)}/шт.`, 'price');
+    [quantity, price].forEach(node => node.classList.add('num'));
+    const total = cell('td', money.format(line.total), 'total');
+    total.classList.add('num');
+    row.append(sku, cell('td', line.name, 'name'), quantity, cell('td', line.urgency, 'urgency'), price, total);
+    body.append(row);
+  });
+  table.append(body);
+  return table;
+}
+
+// Вкладки в шапке. Раздел задаёт адрес: #orders — заявки, всё остальное — расчёт.
+// Так работают кнопка «Назад» и ссылка на раздел.
+function showView() {
+  const view = location.hash === '#orders' ? 'orders' : 'calc';
+  $('#top').hidden = view !== 'calc';
+  $('#orders-view').hidden = view !== 'orders';
+  document.querySelectorAll('.view-tabs a').forEach(tab => {
+    if (tab.dataset.view === view) tab.setAttribute('aria-current', 'page');
+    else tab.removeAttribute('aria-current');
+  });
+  document.title = view === 'orders' ? 'FB Print — Заявки' : 'FB Print — Расчёт стоимости';
 }
 
 function openOrderDialog() {
@@ -908,11 +989,9 @@ async function submitOrder() {
   const form = $('#order-form');
   const button = form.querySelector('[value=submit]');
   const error = $('#order-error');
-  const number = orderNumber();
   const payload = {
     action: 'order',
     password: accessPassword(),
-    number,
     website: new FormData(form).get('website'),
     catalogVersion: data.version,
     total: orderTotal(),
@@ -957,6 +1036,15 @@ async function submitOrder() {
     }
     if (!result?.ok) throw new Error(result?.error?.message ?? 'Заявка не отправлена');
 
+    // Номер выдаёт Apps Script по порядку: FB-0001, FB-0002…
+    const number = String(result.number ?? '');
+    renderSentOrders(saveSentOrder({
+      number,
+      sentAt: new Date().toISOString(),
+      total: payload.total,
+      count: payload.lines.length,
+      lines: payload.lines.map(({ company, sku, name, quantity, urgency, unitPrice, total }) => ({ company, sku, name, quantity, urgency, unitPrice, total }))
+    }));
     $('#order-number').textContent = number;
     $('#order-confirm').hidden = true;
     $('#order-sent').hidden = false;
@@ -1185,4 +1273,10 @@ document.fonts?.ready.then(refitTotals);
 window.addEventListener('resize', refitTotals);
 
 applyCatalog(data);
+renderSentOrders();
+showView();
+window.addEventListener('hashchange', () => {
+  showView();
+  window.scrollTo(0, 0);
+});
 loadData();
