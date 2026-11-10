@@ -50,8 +50,9 @@
              компанию сайт берёт из таблицы, а не из шага 1. Файл перетаскивают на зону или выбирают кнопкой. -->
         <div class="bulk-block">
           <div class="bulk-import" id="import-drop">
-            <svg class="bulk-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0-4 4m4-4 4 4M5 15v4h14v-4"/></svg>
-            <p><strong>Заявка из Excel</strong> — перетащите файл сюда</p>
+            <svg class="bulk-icon bulk-icon--upload" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0-4 4m4-4 4 4M5 15v4h14v-4"/></svg>
+            <svg class="bulk-icon bulk-icon--done" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.8 2.8L16.5 9"/></svg>
+            <p id="import-drop-text" aria-live="polite"><strong>Заявка из Excel</strong> — перетащите файл сюда</p>
             <button class="bulk-button" id="import-file-button" type="button">Выбрать файл</button>
             <input id="import-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
           </div>
@@ -154,7 +155,7 @@
             <h2 id="order-title">Ваша заявка</h2>
             <p id="order-counter">Пока нет позиций</p>
           </div>
-          <button class="icon-button" id="clear-order" type="button" aria-label="Очистить заявку" disabled>
+          <button class="icon-button icon-button--danger" id="clear-order" type="button" aria-label="Очистить заявку" title="Очистить заявку" disabled>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16m-10 4v6m4-6v6M9 7l1-3h4l1 3m-9 0 1 14h10l1-14"/></svg>
           </button>
         </div>
@@ -165,13 +166,26 @@
           <p>Найдите артикул выше или загрузите заявку из Excel.</p>
         </div>
 
-        <!-- Позиции — таблицей на всю ширину: большая заявка прокручивается внутри, шапка таблицы остаётся на месте. -->
+        <!-- Позиции — таблицей на всю ширину, по страницам. -->
         <div class="order-table-wrap" id="order-table" hidden>
           <table class="order-table">
             <thead><tr><th>Компания и код</th><th>Наименование</th><th class="num">Тираж, шт.</th><th>Срок</th><th class="num">Цена за шт.</th><th class="num">Сумма</th><th><span class="visually-hidden">Удалить</span></th></tr></thead>
             <tbody id="order-lines"></tbody>
           </table>
         </div>
+        <!-- Постраничный вывод: по умолчанию 10 позиций на странице. -->
+        <nav class="order-pager" id="order-pager" aria-label="Страницы заявки" hidden>
+          <span id="order-range"></span>
+          <div class="pager-pages" id="order-pages"></div>
+          <label class="pager-size">На странице
+            <select id="order-page-size">
+              <option value="10" selected>10</option>
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="0">Все</option>
+            </select>
+          </label>
+        </nav>
 
         <div class="order-footer">
           <div class="order-total"><span>Итого</span><strong id="order-total">0 ₽</strong></div>

@@ -789,11 +789,22 @@ function addLine() {
   }
 
   order.push(makeLine(article, value, result));
+  orderPage = orderPageCount();
   renderOrder();
   toast({
     good: 'Позиция добавлена в заявку.',
     reduced: 'Позиция добавлена по цене сниженного тиража.'
   }[result.status] ?? 'Позиция добавлена. Проверьте условия тиража.');
+}
+
+function lineNote(line) {
+  if (line.status !== 'reduced' && line.status !== 'multiple') return null;
+  const item = data.articles.find(entry => lineKey(entry) === line.key);
+  const category = item && categories().get(item.categoryId);
+  if (!category) return null;
+  return line.status === 'reduced'
+    ? { label: 'Сниженный тираж', hint: `От ${integer.format(minimumValid(category))} шт. — ${money.format(category.prices.standard)} за штуку` }
+    : { label: 'Не кратно', hint: `Кратность ${integer.format(category.multiple)} шт.` };
 }
 
 function makeLine(item, value, result) {
@@ -837,6 +848,7 @@ function changeLineQuantity(line, input) {
     return;
   }
   const urgencyDropped = result.urgency !== line.urgency;
+  flashLineId = line.id;
   Object.assign(line, {
     quantity: value,
     urgency: result.urgency,
@@ -850,6 +862,51 @@ function changeLineQuantity(line, input) {
     : { good: 'Тираж изменён.', reduced: 'Тираж изменён: цена сниженного тиража.' }[result.status] ?? 'Тираж изменён. Проверьте кратность.');
 }
 
+// Таблица заявки — по страницам: 10 позиций по умолчанию, можно 25, 50 или все сразу.
+let orderPage = 1;
+let orderPageSize = 10;
+// Строка, где только что изменили тираж: на секунду подсвечивается, чтобы было видно, что сумма пересчиталась.
+let flashLineId = null;
+
+function orderPageCount() {
+  return orderPageSize ? Math.max(1, Math.ceil(order.length / orderPageSize)) : 1;
+}
+
+// Номера страниц: первая, последняя и соседние с текущей, между ними — многоточие.
+function pagerItems(current, total) {
+  const pages = [...new Set([1, current - 1, current, current + 1, total])].filter(page => page >= 1 && page <= total).sort((a, b) => a - b);
+  return pages.flatMap((page, index) => (index && page - pages[index - 1] > 1 ? ['…', page] : [page]));
+}
+
+function renderPager() {
+  const pager = $('#order-pager');
+  pager.hidden = order.length <= 10;
+  if (pager.hidden) return;
+  const total = orderPageCount();
+  const first = orderPageSize ? (orderPage - 1) * orderPageSize + 1 : 1;
+  const last = orderPageSize ? Math.min(order.length, orderPage * orderPageSize) : order.length;
+  $('#order-range').textContent = `Позиции ${first}–${last} из ${order.length}`;
+  const root = $('#order-pages');
+  root.innerHTML = '';
+  if (total < 2) return;
+  const button = (label, page, current = false) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.textContent = label;
+    item.disabled = page < 1 || page > total;
+    if (current) item.setAttribute('aria-current', 'page');
+    item.ariaLabel = label === '‹' ? 'Предыдущая страница' : label === '›' ? 'Следующая страница' : `Страница ${page}`;
+    item.addEventListener('click', () => {
+      orderPage = page;
+      renderOrder();
+    });
+    return item;
+  };
+  root.append(button('‹', orderPage - 1));
+  pagerItems(orderPage, total).forEach(item => root.append(item === '…' ? cell('span', '…') : button(String(item), item, item === orderPage)));
+  root.append(button('›', orderPage + 1));
+}
+
 function renderOrder() {
   const empty = $('#order-empty');
   const root = $('#order-lines');
@@ -857,8 +914,10 @@ function renderOrder() {
   root.innerHTML = '';
 
   $('#order-table').hidden = !order.length;
+  orderPage = Math.min(Math.max(1, orderPage), orderPageCount());
+  const visible = orderPageSize ? order.slice((orderPage - 1) * orderPageSize, orderPage * orderPageSize) : order;
   // Строка таблицы: компания и код, наименование, тираж (можно изменить), срок, цена за штуку, сумма, удалить.
-  order.forEach(line => {
+  visible.forEach(line => {
     const row = document.createElement('tr');
     const code = cell('td', line.sku, 'code');
     code.prepend(cell('small', line.company));
@@ -876,6 +935,21 @@ function renderOrder() {
       if (event.key === 'Enter') quantityInput.blur();
     });
     quantity.append(quantityInput);
+    // Тираж не оптимальный — ярлык под полем, как в окне проверки. Подробность — во всплывающей подсказке.
+    const note = lineNote(line);
+    if (note) {
+      const tag = cell('span', note.label);
+      tag.className = 'line-tag line-tag--warn';
+      tag.title = note.hint;
+      quantity.append(tag);
+    }
+
+    const urgency = document.createElement('td');
+    urgency.dataset.cell = 'urgency';
+    const urgencyLabel = cell('span', urgencyLabels[line.urgency]);
+    // Обычный срок — серым текстом, срочный и экстренный — ярлыком: они дороже и требуют подтверждения.
+    if (line.urgency !== 'standard') urgencyLabel.className = `line-tag line-tag--${line.urgency}`;
+    urgency.append(urgencyLabel);
 
     const price = cell('td', money.format(line.unitPrice), 'price');
     price.className = 'num';
@@ -896,10 +970,13 @@ function renderOrder() {
     });
     removeCell.append(remove);
 
-    row.append(code, cell('td', line.name, 'name'), quantity, cell('td', urgencyLabels[line.urgency], 'urgency'), price, total, removeCell);
+    row.append(code, cell('td', line.name, 'name'), quantity, urgency, price, total, removeCell);
+    if (line.id === flashLineId) row.className = 'line-flash';
     root.append(row);
   });
 
+  flashLineId = null;
+  renderPager();
   $('#order-total').textContent = money.format(orderTotal());
   fitText($('#order-total'));
   const delivery = $('#delivery-note');
@@ -1215,10 +1292,21 @@ async function importFile(file) {
     }
     prepareImport(items);
     renderImport();
+    markImportedFile(file.name, items.length);
     $('#import-dialog').showModal();
   } catch (error) {
     toast(error.message);
   }
+}
+
+// После загрузки зона показывает галочку, имя файла и число строк; кнопка — «Выбрать другой файл».
+function markImportedFile(name, count) {
+  const zone = $('#import-drop');
+  zone.dataset.state = 'loaded';
+  const textNode = $('#import-drop-text');
+  textNode.innerHTML = '';
+  textNode.append(cell('strong', 'Файл загружен'), ` — ${name} · ${count} ${plural(count, 'строка', 'строки', 'строк')}`);
+  $('#import-file-button').textContent = 'Выбрать другой файл';
 }
 
 function addImportedLines() {
@@ -1231,6 +1319,7 @@ function addImportedLines() {
   });
   const skipped = importRows.length - added;
   $('#import-dialog').close();
+  orderPage = 1;
   renderOrder();
   toast(`Добавлено ${added} ${plural(added, 'позиция', 'позиции', 'позиций')}${skipped ? `, пропущено ${skipped}` : ''}.`);
 }
@@ -1649,6 +1738,11 @@ $('#import-fix-all').addEventListener('click', () => {
   renderImport();
 });
 $('#import-add').addEventListener('click', addImportedLines);
+$('#order-page-size').addEventListener('change', event => {
+  orderPageSize = Number(event.target.value);
+  orderPage = 1;
+  renderOrder();
+});
 $('#close-import-dialog').addEventListener('click', () => $('#import-dialog').close());
 $('#clear-order').addEventListener('click', () => {
   order = [];
