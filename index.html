@@ -162,10 +162,16 @@
         <div class="order-empty" id="order-empty">
           <div class="empty-label" aria-hidden="true"></div>
           <strong>Здесь появятся выбранные этикетки</strong>
-          <p>Можно добавить несколько артикулов одной компании.</p>
+          <p>Найдите артикул выше или загрузите заявку из Excel.</p>
         </div>
 
-        <div class="order-lines" id="order-lines"></div>
+        <!-- Позиции — таблицей на всю ширину: большая заявка прокручивается внутри, шапка таблицы остаётся на месте. -->
+        <div class="order-table-wrap" id="order-table" hidden>
+          <table class="order-table">
+            <thead><tr><th>Компания и код</th><th>Наименование</th><th class="num">Тираж, шт.</th><th>Срок</th><th class="num">Цена за шт.</th><th class="num">Сумма</th><th><span class="visually-hidden">Удалить</span></th></tr></thead>
+            <tbody id="order-lines"></tbody>
+          </table>
+        </div>
 
         <div class="order-footer">
           <div class="order-total"><span>Итого</span><strong id="order-total">0 ₽</strong></div>

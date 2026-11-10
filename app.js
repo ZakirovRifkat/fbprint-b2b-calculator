@@ -856,14 +856,16 @@ function renderOrder() {
   empty.hidden = order.length > 0;
   root.innerHTML = '';
 
+  $('#order-table').hidden = !order.length;
+  // Строка таблицы: компания и код, наименование, тираж (можно изменить), срок, цена за штуку, сумма, удалить.
   order.forEach(line => {
-    const item = document.createElement('div');
-    const title = document.createElement('strong');
-    const details = document.createElement('span');
-    const total = document.createElement('b');
-    const remove = document.createElement('button');
-    item.className = 'order-line';
-    title.textContent = `${line.sku} · ${line.name}`;
+    const row = document.createElement('tr');
+    const code = cell('td', line.sku, 'code');
+    code.prepend(cell('small', line.company));
+
+    const quantity = document.createElement('td');
+    quantity.className = 'num';
+    quantity.dataset.cell = 'quantity';
     const quantityInput = document.createElement('input');
     quantityInput.className = 'line-quantity-input';
     quantityInput.inputMode = 'numeric';
@@ -873,17 +875,29 @@ function renderOrder() {
     quantityInput.addEventListener('keydown', event => {
       if (event.key === 'Enter') quantityInput.blur();
     });
-    details.append(quantityInput, ` шт. · ${urgencyLabels[line.urgency]} · ${money.format(line.unitPrice)}/шт.`);
-    total.textContent = money.format(line.total);
+    quantity.append(quantityInput);
+
+    const price = cell('td', money.format(line.unitPrice), 'price');
+    price.className = 'num';
+    const total = cell('td', money.format(line.total), 'total');
+    total.className = 'num';
+
+    const removeCell = document.createElement('td');
+    removeCell.dataset.cell = 'remove';
+    const remove = document.createElement('button');
     remove.type = 'button';
-    remove.textContent = 'Удалить';
+    remove.className = 'line-remove';
+    remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+    remove.title = 'Удалить позицию';
     remove.ariaLabel = `Удалить артикул ${line.sku}`;
     remove.addEventListener('click', () => {
       order = order.filter(item => item.id !== line.id);
       renderOrder();
     });
-    item.append(title, details, total, remove);
-    root.append(item);
+    removeCell.append(remove);
+
+    row.append(code, cell('td', line.name, 'name'), quantity, cell('td', urgencyLabels[line.urgency], 'urgency'), price, total, removeCell);
+    root.append(row);
   });
 
   $('#order-total').textContent = money.format(orderTotal());
