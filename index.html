@@ -46,6 +46,16 @@
           <strong id="catalog-alert-title"></strong>
           <p id="catalog-alert-message"></p>
         </div>
+        <!-- Заявка из Excel — над шагами: в файле могут быть позиции разных компаний,
+             компанию сайт берёт из таблицы, а не из шага 1. Файл перетаскивают на зону или выбирают кнопкой. -->
+        <div class="bulk-block">
+          <div class="bulk-import" id="import-drop">
+            <svg class="bulk-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0-4 4m4-4 4 4M5 15v4h14v-4"/></svg>
+            <p><strong>Заявка из Excel</strong> — перетащите файл сюда</p>
+            <button class="bulk-button" id="import-file-button" type="button">Выбрать файл</button>
+            <input id="import-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+          </div>
+        </div>
         <div class="step-block">
           <div class="step-heading">
             <span class="step-number">1</span>
@@ -85,14 +95,6 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
             </button>
           </article>
-          <!-- Большие заявки: свою таблицу клиента можно загрузить целиком, сайт проверит каждый тираж.
-               Файл перетаскивают на зону или выбирают кнопкой. -->
-          <div class="bulk-import" id="import-drop">
-            <svg class="bulk-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0-4 4m4-4 4 4M5 15v4h14v-4"/></svg>
-            <p><strong>Заявка из Excel</strong> — перетащите файл сюда</p>
-            <button class="bulk-button" id="import-file-button" type="button">Выбрать файл</button>
-            <input id="import-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
-          </div>
         </div>
 
         <div class="step-block calculation" id="calculation-block" aria-disabled="true">

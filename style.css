@@ -168,7 +168,8 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .sent-orders li strong{font-family:Unbounded;font-size:18px;font-variant-numeric:tabular-nums}
 .sent-orders li span{color:var(--muted);font-variant-numeric:tabular-nums}
 .sent-orders li b{font-family:Unbounded;font-size:18px;font-variant-numeric:tabular-nums;white-space:nowrap}
-.bulk-import{margin-top:22px;padding:18px 20px;border:1.5px dashed #b9b5d9;border-radius:14px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px 16px;background:#faf9fc;transition:background .2s var(--ease),border-color .2s var(--ease)}
+.bulk-block{padding:24px clamp(24px,4vw,52px);border-bottom:1px solid var(--line)}
+.bulk-import{padding:18px 20px;border:1.5px dashed #b9b5d9;border-radius:14px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px 16px;background:#faf9fc;transition:background .2s var(--ease),border-color .2s var(--ease)}
 .bulk-import p{margin:0;color:var(--muted);font-size:14px}
 .bulk-import p strong{color:var(--ink)}
 .bulk-icon{width:26px;height:26px;fill:none;stroke:var(--muted);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -266,6 +267,7 @@ dialog p{margin:0 0 6px;color:var(--muted)}
 .workspace{padding-inline:14px}
 .builder,.order{border-radius:18px}
 .step-block{padding:28px 20px}
+.bulk-block{padding:20px}
 .step-heading{gap:12px}
 .calculation-grid{grid-template-columns:1fr}
 .company-switch{display:grid;grid-template-columns:1fr 1fr}
