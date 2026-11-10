@@ -788,8 +788,9 @@ function addLine() {
     return;
   }
 
-  order.push(makeLine(article, value, result));
-  orderPage = orderPageCount();
+  const line = makeLine(article, value, result);
+  order.push(line);
+  showLine(line);
   renderOrder();
   toast({
     good: 'Позиция добавлена в заявку.',
@@ -862,14 +863,97 @@ function changeLineQuantity(line, input) {
     : { good: 'Тираж изменён.', reduced: 'Тираж изменён: цена сниженного тиража.' }[result.status] ?? 'Тираж изменён. Проверьте кратность.');
 }
 
+// Фильтры и сортировка таблицы заявки. Порядок по умолчанию — порядок добавления.
+const orderFilter = { query: '', company: '', urgency: '', issue: '' };
+let orderSort = { key: '', dir: 1 };
+const urgencyRank = { standard: 0, urgent: 1, emergency: 2 };
+const sortValue = {
+  code: line => `${line.company} ${line.sku.padStart(12, '0')}`,
+  name: line => line.name,
+  quantity: line => line.quantity,
+  urgency: line => urgencyRank[line.urgency],
+  price: line => line.unitPrice,
+  total: line => line.total
+};
+
+function filtersActive() {
+  return Object.values(orderFilter).some(Boolean);
+}
+
+function visibleOrder() {
+  const query = searchKey(orderFilter.query);
+  const list = order.filter(line => {
+    if (query && !searchKey(`${line.sku} ${line.name}`).includes(query)) return false;
+    if (orderFilter.company && line.company !== orderFilter.company) return false;
+    if (orderFilter.urgency && line.urgency !== orderFilter.urgency) return false;
+    if (orderFilter.issue === 'issues' && line.status !== 'reduced' && line.status !== 'multiple') return false;
+    if ((orderFilter.issue === 'reduced' || orderFilter.issue === 'multiple') && line.status !== orderFilter.issue) return false;
+    return true;
+  });
+  if (!orderSort.key) return list;
+  const value = sortValue[orderSort.key];
+  // Сортировка устойчивая: при равных значениях сохраняется порядок добавления.
+  return list
+    .map((line, index) => ({ line, index }))
+    .sort((a, b) => {
+      const x = value(a.line);
+      const y = value(b.line);
+      const compare = typeof x === 'number' ? x - y : String(x).localeCompare(String(y), 'ru', { numeric: true });
+      return compare * orderSort.dir || a.index - b.index;
+    })
+    .map(item => item.line);
+}
+
+function renderOrderTools(shownCount) {
+  const tools = $('#order-tools');
+  tools.hidden = order.length < 6 && !filtersActive();
+  const companies = [...new Set(order.map(line => line.company))];
+  const companySelect = $('#order-filter-company');
+  const current = companySelect.value;
+  companySelect.innerHTML = '<option value="">Все компании</option>';
+  companies.forEach(name => companySelect.append(new Option(name, name)));
+  companySelect.value = companies.includes(current) ? current : '';
+  orderFilter.company = companySelect.value;
+  companySelect.hidden = companies.length < 2;
+  ['#order-filter-company', '#order-filter-urgency', '#order-filter-issue'].forEach(selector => $(selector).classList.toggle('is-active', Boolean($(selector).value)));
+  $('#order-filter-reset').hidden = !filtersActive();
+  $('#order-none').hidden = shownCount > 0 || !order.length;
+  document.querySelectorAll('.order-table th[data-sort]').forEach(th => {
+    if (th.dataset.sort === orderSort.key) th.setAttribute('aria-sort', orderSort.dir > 0 ? 'ascending' : 'descending');
+    else th.removeAttribute('aria-sort');
+  });
+  const sortSelect = $('#order-sort-select');
+  const sortCode = orderSort.key ? `${orderSort.key}:${orderSort.dir}` : '';
+  if ([...sortSelect.options].some(option => option.value === sortCode)) sortSelect.value = sortCode;
+}
+
+function clearOrderFilters() {
+  Object.keys(orderFilter).forEach(key => { orderFilter[key] = ''; });
+  $('#order-search').value = '';
+  ['#order-filter-company', '#order-filter-urgency', '#order-filter-issue'].forEach(selector => { $(selector).value = ''; });
+}
+
+function resetOrderFilters() {
+  clearOrderFilters();
+  orderPage = 1;
+  renderOrder();
+}
+
+// Новая позиция должна быть видна: фильтры сбрасываются, открывается страница, где она стоит с учётом сортировки.
+function showLine(line) {
+  clearOrderFilters();
+  const index = visibleOrder().indexOf(line);
+  orderPage = orderPageSize ? Math.floor(index / orderPageSize) + 1 : 1;
+}
+
 // Таблица заявки — по страницам: 10 позиций по умолчанию, можно 25, 50 или все сразу.
 let orderPage = 1;
 let orderPageSize = 10;
 // Строка, где только что изменили тираж: на секунду подсвечивается, чтобы было видно, что сумма пересчиталась.
 let flashLineId = null;
 
-function orderPageCount() {
-  return orderPageSize ? Math.max(1, Math.ceil(order.length / orderPageSize)) : 1;
+function orderPageCount(count = visibleOrder().length) {
+  return orderPageSize ? Math.max(1, Math.ceil(count / orderPageSize)) : 1;
 }
 
 // Номера страниц: первая, последняя и соседние с текущей, между ними — многоточие.
@@ -878,14 +962,14 @@ function pagerItems(current, total) {
   return pages.flatMap((page, index) => (index && page - pages[index - 1] > 1 ? ['…', page] : [page]));
 }
 
-function renderPager() {
+function renderPager(shownCount) {
   const pager = $('#order-pager');
-  pager.hidden = order.length <= 10;
+  pager.hidden = order.length <= 10 || !shownCount;
   if (pager.hidden) return;
-  const total = orderPageCount();
+  const total = orderPageCount(shownCount);
   const first = orderPageSize ? (orderPage - 1) * orderPageSize + 1 : 1;
-  const last = orderPageSize ? Math.min(order.length, orderPage * orderPageSize) : order.length;
-  $('#order-range').textContent = `Позиции ${first}–${last} из ${order.length}`;
+  const last = orderPageSize ? Math.min(shownCount, orderPage * orderPageSize) : shownCount;
+  $('#order-range').textContent = `Позиции ${first}–${last} из ${shownCount}${shownCount < order.length ? ` (всего ${order.length})` : ''}`;
   const root = $('#order-pages');
   root.innerHTML = '';
   if (total < 2) return;
@@ -914,8 +998,9 @@ function renderOrder() {
   root.innerHTML = '';
 
   $('#order-table').hidden = !order.length;
-  orderPage = Math.min(Math.max(1, orderPage), orderPageCount());
-  const visible = orderPageSize ? order.slice((orderPage - 1) * orderPageSize, orderPage * orderPageSize) : order;
+  const shown = visibleOrder();
+  orderPage = Math.min(Math.max(1, orderPage), orderPageCount(shown.length));
+  const visible = orderPageSize ? shown.slice((orderPage - 1) * orderPageSize, orderPage * orderPageSize) : shown;
   // Строка таблицы: компания и код, наименование, тираж (можно изменить), срок, цена за штуку, сумма, удалить.
   visible.forEach(line => {
     const row = document.createElement('tr');
@@ -976,7 +1061,8 @@ function renderOrder() {
   });
 
   flashLineId = null;
-  renderPager();
+  renderOrderTools(shown.length);
+  renderPager(shown.length);
   $('#order-total').textContent = money.format(orderTotal());
   fitText($('#order-total'));
   const delivery = $('#delivery-note');
@@ -1319,6 +1405,7 @@ function addImportedLines() {
   });
   const skipped = importRows.length - added;
   $('#import-dialog').close();
+  clearOrderFilters();
   orderPage = 1;
   renderOrder();
   toast(`Добавлено ${added} ${plural(added, 'позиция', 'позиции', 'позиций')}${skipped ? `, пропущено ${skipped}` : ''}.`);
@@ -1738,6 +1825,33 @@ $('#import-fix-all').addEventListener('click', () => {
   renderImport();
 });
 $('#import-add').addEventListener('click', addImportedLines);
+$('#order-search').addEventListener('input', event => {
+  orderFilter.query = event.target.value;
+  orderPage = 1;
+  renderOrder();
+});
+[['#order-filter-company', 'company'], ['#order-filter-urgency', 'urgency'], ['#order-filter-issue', 'issue']].forEach(([selector, key]) => {
+  $(selector).addEventListener('change', event => {
+    orderFilter[key] = event.target.value;
+    orderPage = 1;
+    renderOrder();
+  });
+});
+$('#order-filter-reset').addEventListener('click', resetOrderFilters);
+$('#order-none-reset').addEventListener('click', resetOrderFilters);
+// Клик по заголовку: по возрастанию → по убыванию → порядок добавления.
+document.querySelectorAll('.order-table th[data-sort] .sort-button').forEach(button => button.addEventListener('click', () => {
+  const key = button.parentElement.dataset.sort;
+  orderSort = orderSort.key !== key ? { key, dir: 1 } : orderSort.dir > 0 ? { key, dir: -1 } : { key: '', dir: 1 };
+  orderPage = 1;
+  renderOrder();
+}));
+$('#order-sort-select').addEventListener('change', event => {
+  const [key, dir] = event.target.value.split(':');
+  orderSort = { key: key || '', dir: Number(dir) || 1 };
+  orderPage = 1;
+  renderOrder();
+});
 $('#order-page-size').addEventListener('change', event => {
   orderPageSize = Number(event.target.value);
   orderPage = 1;

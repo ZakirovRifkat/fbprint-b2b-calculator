@@ -166,12 +166,54 @@
           <p>Найдите артикул выше или загрузите заявку из Excel.</p>
         </div>
 
-        <!-- Позиции — таблицей на всю ширину, по страницам. -->
+        <!-- Фильтры и сортировка — для больших заявок (от 6 позиций). -->
+        <div class="order-tools" id="order-tools" hidden>
+          <label class="order-search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
+            <input id="order-search" type="search" autocomplete="off" placeholder="Код или название" aria-label="Найти в заявке по коду или названию">
+          </label>
+          <select id="order-filter-company" aria-label="Компания"><option value="">Все компании</option></select>
+          <select id="order-filter-urgency" aria-label="Срок">
+            <option value="">Любой срок</option>
+            <option value="standard">Стандартный</option>
+            <option value="urgent">Срочный</option>
+            <option value="emergency">Экстренный</option>
+          </select>
+          <select id="order-filter-issue" aria-label="Тираж">
+            <option value="">Любой тираж</option>
+            <option value="issues">С замечаниями</option>
+            <option value="reduced">Сниженный тираж</option>
+            <option value="multiple">Не кратно</option>
+          </select>
+          <select id="order-sort-select" class="order-sort-select" aria-label="Сортировка">
+            <option value="">Порядок добавления</option>
+            <option value="code:1">Код ↑</option>
+            <option value="name:1">Наименование А–Я</option>
+            <option value="quantity:-1">Тираж: больше сначала</option>
+            <option value="total:-1">Сумма: больше сначала</option>
+            <option value="total:1">Сумма: меньше сначала</option>
+          </select>
+          <button class="text-button" id="order-filter-reset" type="button" hidden>Сбросить</button>
+        </div>
+
+        <!-- Позиции — таблицей на всю ширину, по страницам. Заголовки столбцов сортируют. -->
         <div class="order-table-wrap" id="order-table" hidden>
           <table class="order-table">
-            <thead><tr><th>Компания и код</th><th>Наименование</th><th class="num">Тираж, шт.</th><th>Срок</th><th class="num">Цена за шт.</th><th class="num">Сумма</th><th><span class="visually-hidden">Удалить</span></th></tr></thead>
+            <thead><tr>
+              <th data-sort="code"><button class="sort-button" type="button">Компания и код</button></th>
+              <th data-sort="name"><button class="sort-button" type="button">Наименование</button></th>
+              <th data-sort="quantity" class="num"><button class="sort-button" type="button">Тираж, шт.</button></th>
+              <th data-sort="urgency"><button class="sort-button" type="button">Срок</button></th>
+              <th data-sort="price" class="num"><button class="sort-button" type="button">Цена за шт.</button></th>
+              <th data-sort="total" class="num"><button class="sort-button" type="button">Сумма</button></th>
+              <th><span class="visually-hidden">Удалить</span></th>
+            </tr></thead>
             <tbody id="order-lines"></tbody>
           </table>
+          <div class="order-none" id="order-none" hidden>
+            <p>Под фильтры ничего не подходит.</p>
+            <button class="text-button" id="order-none-reset" type="button">Сбросить фильтры</button>
+          </div>
         </div>
         <!-- Постраничный вывод: по умолчанию 10 позиций на странице. -->
         <nav class="order-pager" id="order-pager" aria-label="Страницы заявки" hidden>
