@@ -536,7 +536,7 @@ function inOrder(item) {
 
 function selectArticle(nextArticle) {
   if (inOrder(nextArticle)) {
-    toast('Этот артикул уже в заявке. Чтобы изменить тираж, удалите позицию и добавьте заново.');
+    toast('Этот артикул уже в заявке. Тираж можно изменить прямо в заявке.');
     return;
   }
   article = nextArticle;
@@ -788,14 +788,56 @@ function addLine() {
     return;
   }
 
-  const company = data.companies.find(item => item.id === article.companyId);
-  order.push({
+  order.push(makeLine(article, value, result));
+  renderOrder();
+  toast({
+    good: 'Позиция добавлена в заявку.',
+    reduced: 'Позиция добавлена по цене сниженного тиража.'
+  }[result.status] ?? 'Позиция добавлена. Проверьте условия тиража.');
+}
+
+function makeLine(item, value, result) {
+  const category = categories().get(item.categoryId);
+  const company = data.companies.find(entry => entry.id === item.companyId);
+  return {
     id: createId(),
-    key: lineKey(article),
+    key: lineKey(item),
     company: company.name,
-    sku: article.sku,
-    name: article.name,
+    sku: item.sku,
+    name: item.name,
     size: category.size,
+    quantity: value,
+    urgency: result.urgency,
+    unitPrice: result.unitPrice,
+    total: roundMoney(value * result.unitPrice),
+    status: result.status
+  };
+}
+
+// Тираж меняется прямо в заявке: цена и пометки пересчитываются по тем же правилам, что в калькуляторе.
+// Тираж ниже минимального заказа не принимается — остаётся прежний.
+function changeLineQuantity(line, input) {
+  const value = Math.max(0, Number(String(input.value).replace(/\D/g, '')) || 0);
+  const item = data.articles.find(entry => lineKey(entry) === line.key);
+  const category = item && categories().get(item.categoryId);
+  const restore = () => { input.value = integer.format(line.quantity); };
+  if (!category) {
+    toast('Артикула больше нет в каталоге — тираж не изменить.');
+    restore();
+    return;
+  }
+  if (value === line.quantity) {
+    restore();
+    return;
+  }
+  const result = quote(value, category, value < category.minimumQuantity ? 'standard' : line.urgency);
+  if (!result.canAdd) {
+    toast(`${result.message} Тираж не изменён.`);
+    restore();
+    return;
+  }
+  const urgencyDropped = result.urgency !== line.urgency;
+  Object.assign(line, {
     quantity: value,
     urgency: result.urgency,
     unitPrice: result.unitPrice,
@@ -803,10 +845,9 @@ function addLine() {
     status: result.status
   });
   renderOrder();
-  toast({
-    good: 'Позиция добавлена в заявку.',
-    reduced: 'Позиция добавлена по цене сниженного тиража.'
-  }[result.status] ?? 'Позиция добавлена. Проверьте условия тиража.');
+  toast(urgencyDropped
+    ? 'Тираж меньше минимального: срок изменён на стандартный.'
+    : { good: 'Тираж изменён.', reduced: 'Тираж изменён: цена сниженного тиража.' }[result.status] ?? 'Тираж изменён. Проверьте кратность.');
 }
 
 function renderOrder() {
@@ -823,7 +864,16 @@ function renderOrder() {
     const remove = document.createElement('button');
     item.className = 'order-line';
     title.textContent = `${line.sku} · ${line.name}`;
-    details.textContent = `${integer.format(line.quantity)} шт. · ${urgencyLabels[line.urgency]} · ${money.format(line.unitPrice)}/шт.`;
+    const quantityInput = document.createElement('input');
+    quantityInput.className = 'line-quantity-input';
+    quantityInput.inputMode = 'numeric';
+    quantityInput.value = integer.format(line.quantity);
+    quantityInput.ariaLabel = `Тираж артикула ${line.sku}`;
+    quantityInput.addEventListener('change', () => changeLineQuantity(line, quantityInput));
+    quantityInput.addEventListener('keydown', event => {
+      if (event.key === 'Enter') quantityInput.blur();
+    });
+    details.append(quantityInput, ` шт. · ${urgencyLabels[line.urgency]} · ${money.format(line.unitPrice)}/шт.`);
     total.textContent = money.format(line.total);
     remove.type = 'button';
     remove.textContent = 'Удалить';
@@ -883,6 +933,292 @@ function deliveryText() {
   return total >= freeDeliveryFrom
     ? `Доставка бесплатная от ${money.format(freeDeliveryFrom)}.`
     : `До бесплатной доставки — ${money.format(roundMoney(freeDeliveryFrom - total))}. Сейчас доставка платная или самовывоз.`;
+}
+
+// Загрузка заявки списком: файл Excel клиента — перетаскиванием на зону или кнопкой «Выбрать файл».
+// Формат таблицы свободный: сайт ищет строку заголовков с «Код» (или «Артикул») и столбец тиража
+// («Тираж», «Заказ…, шт», «Количество»); название компании в заголовке задаёт компанию блока.
+// Без заголовков: первый заполненный столбец — код, следующий с числом — тираж, компания — выбранная на сайте.
+// Каждая строка проверяется теми же правилами, что и калькулятор (quote).
+let importRows = [];
+const importLabels = {
+  good: 'Подходит',
+  reduced: 'Сниженный тираж',
+  multiple: 'Не кратно',
+  blocked: 'Меньше минимума',
+  missing: 'Нет в каталоге',
+  duplicate: 'Повтор',
+  inOrder: 'Уже в заявке'
+};
+
+const looseText = value => String(value ?? '').toLocaleLowerCase('ru-RU').replace(/ё/g, 'е').replace(/[^a-zа-я0-9]/g, '');
+
+// Значение ячейки ExcelJS: формулы, форматированный текст и гиперссылки — к простому значению.
+function cellValue(value) {
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) return '';
+  if (typeof value === 'object') {
+    if ('result' in value) return cellValue(value.result);
+    if (Array.isArray(value.richText)) return value.richText.map(part => part.text).join('');
+    if ('text' in value) return String(value.text);
+    return '';
+  }
+  return value;
+}
+
+function skuText(value) {
+  return String(value ?? '').trim().replace(/\.0+$/, '');
+}
+
+function quantityValue(value) {
+  const parsed = typeof value === 'number' ? value : Number(String(value ?? '').replace(/[\s\u00a0]/g, '').replace(',', '.'));
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
+}
+
+function urgencyValue(value) {
+  const key = looseText(value);
+  return key.includes('экстр') ? 'emergency' : key.includes('сроч') ? 'urgent' : 'standard';
+}
+
+function companyByName(value) {
+  const key = looseText(value);
+  return key ? data.companies.find(item => looseText(item.name) === key) ?? null : null;
+}
+
+function guessLayout(cells) {
+  const filled = cells.map((value, index) => [value, index]).filter(([value]) => String(value).trim() !== '');
+  const quantity = filled.slice(1).find(([value]) => quantityValue(value) > 0);
+  if (!filled.length || !quantity) return null;
+  const urgency = filled.slice(1).find(([value]) => /сроч|экстр|станд/i.test(String(value)));
+  return { sku: filled[0][1], quantity: quantity[1], urgency: urgency ? urgency[1] : -1, companyId: null };
+}
+
+// rows — массив строк, строка — массив значений ячеек. Возвращает позиции {companyId, sku, quantity, urgency, source}.
+function parseImportRows(rows, sourceName, fallbackCompanyId = null) {
+  const items = [];
+  let layout = null;
+  rows.forEach((row, index) => {
+    const cells = Array.from(row ?? [], cellValue);
+    const keys = cells.map(looseText);
+    const skuColumn = keys.findIndex(key => key === 'код' || key === 'арт' || key.startsWith('артикул') || key === 'кодтовара');
+    if (skuColumn >= 0) {
+      const quantity = keys.findIndex((key, column) => column !== skuColumn && /тираж|заказ|колич|колво|шт/.test(key) && !/цен|стоим|сумм/.test(key));
+      const urgency = keys.findIndex((key, column) => column !== skuColumn && /срок|срочн/.test(key));
+      const company = cells.map(companyByName).find(Boolean);
+      layout = { sku: skuColumn, quantity, urgency, companyId: company?.id ?? fallbackCompanyId };
+      return;
+    }
+    const current = layout ?? guessLayout(cells);
+    if (!current || current.quantity < 0) return;
+    const sku = skuText(cells[current.sku]);
+    const quantity = quantityValue(cells[current.quantity]);
+    // Строки без цифр в коде — подписи и «Итого», без тиража — пустые.
+    if (!/\d/.test(sku) || !quantity) return;
+    items.push({
+      companyId: current.companyId ?? fallbackCompanyId,
+      sku,
+      quantity,
+      urgency: current.urgency >= 0 ? urgencyValue(cells[current.urgency]) : 'standard',
+      source: `${sourceName}строка ${index + 1}`
+    });
+  });
+  return items;
+}
+
+async function readImportFile(file) {
+  const ExcelJS = await loadExcelJs();
+  const book = new ExcelJS.Workbook();
+  try {
+    await book.xlsx.load(await file.arrayBuffer());
+  } catch {
+    throw new Error('Не удалось прочитать файл. Сохраните таблицу в формате .xlsx и попробуйте снова.');
+  }
+  const sheets = book.worksheets
+    .filter(sheet => !sheet.state || sheet.state === 'visible')
+    .map(sheet => {
+      const rows = [];
+      sheet.eachRow({ includeEmpty: true }, (row, number) => {
+        rows[number - 1] = Array.from(row.values).slice(1);
+      });
+      return { name: sheet.name, rows: Array.from(rows, row => row ?? []) };
+    })
+    .map(sheet => ({ ...sheet, items: parseImportRows(sheet.rows, '', companyByName(sheet.name)?.id ?? null) }))
+    .filter(sheet => sheet.items.length);
+  // Название листа нужно в подписи строки, только если позиции нашлись на нескольких листах.
+  return sheets.flatMap(sheet => sheet.items.map(item => (sheets.length > 1 ? { ...item, source: `лист «${sheet.name}», ${item.source}` } : item)));
+}
+
+// Компания строки: из заголовка таблицы, иначе — выбранная на сайте.
+// Если такого кода у выбранной компании нет, но он есть ровно у одной другой — берём её.
+function prepareImport(items) {
+  const selected = companyId;
+  const seen = new Map();
+  importRows = items.map((item, index) => {
+    let rowCompany = item.companyId ?? selected;
+    let note = '';
+    let found = data.articles.find(entry => entry.companyId === rowCompany && entry.sku === item.sku) ?? null;
+    if (!found && !item.companyId) {
+      const elsewhere = data.articles.filter(entry => entry.sku === item.sku);
+      if (elsewhere.length === 1) {
+        found = elsewhere[0];
+        rowCompany = found.companyId;
+        note = 'Компания определена по коду';
+      }
+    }
+    const row = { id: index, companyId: rowCompany, sku: item.sku, article: found, quantity: item.quantity, urgency: item.urgency, source: item.source, note, duplicateOf: null };
+    const key = `${rowCompany}/${item.sku}`;
+    if (found && seen.has(key)) row.duplicateOf = seen.get(key);
+    else seen.set(key, row);
+    return row;
+  });
+}
+
+function evaluateImportRow(row) {
+  if (!row.article) return { kind: 'missing', canAdd: false, message: 'Проверьте код или попросите менеджера добавить артикул в каталог.' };
+  if (row.duplicateOf) return { kind: 'duplicate', canAdd: false, message: `Этот код уже есть выше (${row.duplicateOf.source}).` };
+  if (inOrder(row.article)) return { kind: 'inOrder', canAdd: false, message: 'Тираж можно изменить в заявке.' };
+  const category = categories().get(row.article.categoryId);
+  const result = quote(row.quantity, category, row.quantity < category.minimumQuantity ? 'standard' : row.urgency);
+  // В таблице на десятки строк — короткие пояснения вместо подсказок калькулятора.
+  const message = {
+    good: '',
+    reduced: `От ${integer.format(minimumValid(category))} шт. — ${money.format(category.prices.standard)} за штуку.`,
+    multiple: `Кратность ${integer.format(category.multiple)} шт.`,
+    blocked: `Минимальный заказ — ${integer.format(result.suggested)} шт.`
+  }[result.status];
+  return { ...result, message, kind: result.status, urgencyDropped: result.canAdd && result.urgency !== row.urgency };
+}
+
+// «Исправить» — то, без чего позицию не принять или тираж не по кратности.
+// Сниженный тираж допустим, поэтому переход на минимальный — только по кнопке в строке.
+function fixable(result) {
+  return Boolean(result.suggested) && (result.kind === 'multiple' || result.kind === 'blocked');
+}
+
+function applyImportSuggestion(row, value) {
+  row.quantity = value;
+  renderImport();
+}
+
+function renderImport() {
+  const body = $('#import-rows');
+  body.innerHTML = '';
+  const counts = {};
+  let addable = 0;
+  let total = 0;
+  importRows.forEach(row => {
+    const result = evaluateImportRow(row);
+    counts[result.kind] = (counts[result.kind] ?? 0) + 1;
+    if (result.canAdd) {
+      addable += 1;
+      total += roundMoney(row.quantity * result.unitPrice);
+    }
+    const tr = document.createElement('tr');
+    tr.dataset.kind = result.kind;
+
+    const company = data.companies.find(item => item.id === row.companyId);
+    const code = cell('td', row.sku, 'code');
+    code.prepend(cell('small', company?.name ?? '—'));
+    code.append(cell('small', row.source));
+
+    const quantity = document.createElement('td');
+    quantity.className = 'num';
+    const input = document.createElement('input');
+    input.inputMode = 'numeric';
+    input.value = integer.format(row.quantity);
+    input.ariaLabel = `Тираж кода ${row.sku}`;
+    input.disabled = !row.article || Boolean(row.duplicateOf);
+    input.addEventListener('change', () => applyImportSuggestion(row, quantityValue(input.value)));
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        input.blur();
+      }
+    });
+    quantity.append(input);
+
+    const status = document.createElement('td');
+    status.dataset.cell = 'status';
+    const box = document.createElement('div');
+    box.className = 'import-status';
+    box.append(cell('em', importLabels[result.kind]));
+    if (result.kind !== 'good') box.append(cell('span', result.message));
+    if (result.urgencyDropped) box.append(cell('span', `${urgencyLabels[row.urgency]} срок — от минимального тиража, посчитано по стандартному.`));
+    if (row.note) box.append(cell('span', row.note));
+    if (result.suggested && result.canAdd !== undefined && (fixable(result) || result.kind === 'reduced')) {
+      const apply = document.createElement('button');
+      apply.type = 'button';
+      apply.textContent = result.kind === 'reduced'
+        ? `Взять ${integer.format(result.suggested)} — по ${money.format(categories().get(row.article.categoryId).prices.standard)}`
+        : `Применить ${integer.format(result.suggested)}`;
+      apply.addEventListener('click', () => applyImportSuggestion(row, result.suggested));
+      box.append(apply);
+    }
+    status.append(box);
+
+    const price = cell('td', result.canAdd ? money.format(result.unitPrice) : '—');
+    price.className = 'num';
+    const sum = cell('td', result.canAdd ? money.format(roundMoney(row.quantity * result.unitPrice)) : '—');
+    sum.className = 'num';
+    tr.append(code, cell('td', row.article?.name ?? '—', 'name'), quantity, status, price, sum);
+    body.append(tr);
+  });
+
+  const parts = ['good', 'reduced', 'multiple', 'blocked', 'missing', 'duplicate', 'inOrder']
+    .filter(kind => counts[kind])
+    .map(kind => `${importLabels[kind].toLocaleLowerCase('ru-RU')} — ${counts[kind]}`);
+  $('#import-summary').textContent = `${importRows.length} ${plural(importRows.length, 'строка', 'строки', 'строк')}: ${parts.join(', ')}.`;
+  const fixes = importRows.filter(row => fixable(evaluateImportRow(row))).length;
+  $('#import-fix-all').disabled = !fixes;
+  $('#import-fix-all').textContent = fixes ? `Исправить все по рекомендациям (${fixes})` : 'Исправлять нечего';
+  const skipped = importRows.length - addable;
+  $('#import-skipped').textContent = skipped
+    ? `Не войдут в заявку: ${skipped} — нет в каталоге, повторы, уже в заявке или тираж меньше минимума.`
+    : 'Все строки можно добавить.';
+  const add = $('#import-add');
+  add.disabled = !addable;
+  add.textContent = addable
+    ? `Добавить ${addable} ${plural(addable, 'позицию', 'позиции', 'позиций')} · ${money.format(roundMoney(total))}`
+    : 'Нечего добавить';
+}
+
+async function importFile(file) {
+  if (!file) return;
+  if (!data.articles.length) {
+    toast('Каталог ещё не загружен.');
+    return;
+  }
+  if (!/\.xlsx$/i.test(file.name)) {
+    toast('Нужен файл Excel в формате .xlsx.');
+    return;
+  }
+  toast('Читаем файл…');
+  try {
+    const items = await readImportFile(file);
+    if (!items.length) {
+      toast('В файле не нашлось строк с кодом и тиражом. Нужны столбцы «Код» и «Тираж» (или «Заказ…, шт»).');
+      return;
+    }
+    prepareImport(items);
+    renderImport();
+    $('#import-dialog').showModal();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+function addImportedLines() {
+  let added = 0;
+  importRows.forEach(row => {
+    const result = evaluateImportRow(row);
+    if (!result.canAdd) return;
+    order.push(makeLine(row.article, row.quantity, result));
+    added += 1;
+  });
+  const skipped = importRows.length - added;
+  $('#import-dialog').close();
+  renderOrder();
+  toast(`Добавлено ${added} ${plural(added, 'позиция', 'позиции', 'позиций')}${skipped ? `, пропущено ${skipped}` : ''}.`);
 }
 
 // Вкладка «Заявки»: все заявки с листа «Заявки» в таблице, новые сверху.
@@ -1253,6 +1589,53 @@ document.querySelectorAll('[name=urgency]').forEach(input => {
   });
 });
 $('#add-line').addEventListener('click', addLine);
+$('#import-file-button').addEventListener('click', () => $('#import-file').click());
+$('#import-file').addEventListener('change', event => {
+  importFile(event.target.files[0]);
+  event.target.value = '';
+});
+// Перетаскивание файла на зону загрузки. Счётчик нужен, потому что dragleave срабатывает и на вложенных элементах.
+let dragDepth = 0;
+const dropZone = $('#import-drop');
+const hasFiles = event => [...(event.dataTransfer?.types ?? [])].includes('Files');
+dropZone.addEventListener('dragenter', event => {
+  if (!hasFiles(event)) return;
+  event.preventDefault();
+  dragDepth += 1;
+  dropZone.dataset.drag = 'true';
+});
+dropZone.addEventListener('dragover', event => {
+  if (!hasFiles(event)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'copy';
+});
+dropZone.addEventListener('dragleave', () => {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) delete dropZone.dataset.drag;
+});
+dropZone.addEventListener('drop', event => {
+  if (!hasFiles(event)) return;
+  event.preventDefault();
+  dragDepth = 0;
+  delete dropZone.dataset.drag;
+  importFile(event.dataTransfer.files[0]);
+});
+// Файл, брошенный мимо зоны, браузер открыл бы вместо сайта — гасим это.
+window.addEventListener('dragover', event => {
+  if (hasFiles(event)) event.preventDefault();
+});
+window.addEventListener('drop', event => {
+  if (hasFiles(event) && !event.target.closest?.('#import-drop')) event.preventDefault();
+});
+$('#import-fix-all').addEventListener('click', () => {
+  importRows.forEach(row => {
+    const result = evaluateImportRow(row);
+    if (fixable(result)) row.quantity = result.suggested;
+  });
+  renderImport();
+});
+$('#import-add').addEventListener('click', addImportedLines);
+$('#close-import-dialog').addEventListener('click', () => $('#import-dialog').close());
 $('#clear-order').addEventListener('click', () => {
   order = [];
   renderOrder();

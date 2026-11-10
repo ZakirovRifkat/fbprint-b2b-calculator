@@ -168,6 +168,40 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .sent-orders li strong{font-family:Unbounded;font-size:18px;font-variant-numeric:tabular-nums}
 .sent-orders li span{color:var(--muted);font-variant-numeric:tabular-nums}
 .sent-orders li b{font-family:Unbounded;font-size:18px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.bulk-import{margin-top:22px;padding:18px 20px;border:1.5px dashed #b9b5d9;border-radius:14px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px 16px;background:#faf9fc;transition:background .2s var(--ease),border-color .2s var(--ease)}
+.bulk-import p{margin:0;color:var(--muted);font-size:14px}
+.bulk-import p strong{color:var(--ink)}
+.bulk-icon{width:26px;height:26px;fill:none;stroke:var(--muted);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.bulk-import[data-drag=true]{border-color:var(--pink);background:#fdeef6}
+.bulk-import[data-drag=true] .bulk-icon{stroke:var(--pink)}
+.bulk-button{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:#fff;color:var(--ink);padding:10px 16px;border-radius:999px;font-weight:700}
+.bulk-button:hover:not(:disabled){border-color:var(--ink)}
+.bulk-button svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+#import-dialog{max-width:1120px}
+#import-dialog form{padding:32px clamp(18px,3vw,36px)}
+.import-toolbar{display:flex;flex-wrap:wrap;gap:8px}
+.import-table-wrap{max-height:min(56vh,560px);overflow:auto;border:1px solid var(--line);border-radius:14px}
+.import-table{width:100%;border-collapse:collapse;font-size:14px}
+.import-table th{position:sticky;top:0;z-index:1;background:#f1eff7;text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:10px 12px}
+.import-table td{padding:10px 12px;border-top:1px solid var(--line);vertical-align:top;font-variant-numeric:tabular-nums}
+.import-table .num{text-align:right;white-space:nowrap}
+.import-table td small{display:block;color:var(--muted);font-size:12px}
+.import-table td[data-cell=name]{min-width:220px;max-width:380px}
+.import-table input{width:96px;border:1px solid #aaa6bd;border-radius:8px;padding:6px 8px;text-align:right;font:inherit;font-variant-numeric:tabular-nums}
+.import-table input:focus{outline:0;border-color:var(--ink);box-shadow:0 0 0 3px rgba(24,17,67,.1)}
+.import-status{display:grid;gap:4px;justify-items:start;min-width:200px}
+.import-status em{font-style:normal;font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px;background:var(--good-bg);color:var(--good)}
+.import-status span{font-size:12px;color:var(--muted)}
+.import-status button{border:0;background:none;padding:0;text-align:left;color:var(--ink);font-weight:700;font-size:13px;text-decoration:underline;text-underline-offset:3px}
+tr[data-kind=reduced] .import-status em,tr[data-kind=multiple] .import-status em{background:var(--warn-bg);color:var(--warn)}
+tr[data-kind=blocked] .import-status em,tr[data-kind=missing] .import-status em{background:var(--danger-bg);color:var(--danger)}
+tr[data-kind=duplicate] .import-status em,tr[data-kind=inOrder] .import-status em{background:#f1eff7;color:var(--muted)}
+tr[data-kind=missing] td,tr[data-kind=duplicate] td,tr[data-kind=inOrder] td{color:var(--muted)}
+.import-footer{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+.import-footer p{margin:0;font-size:14px}
+.import-footer .primary-button{width:auto;min-width:260px}
+.line-quantity-input{width:84px;border:1px solid #4e4879;border-radius:8px;background:transparent;color:#fff;padding:3px 6px;font:inherit;font-variant-numeric:tabular-nums;text-align:right}
+.line-quantity-input:focus{outline:0;border-color:#fff}
 .order-note{font-size:12px;color:#b9b5d9;text-align:center;margin:3px 0 0}
 dialog{border:0;border-radius:20px;padding:0;max-width:520px;width:calc(100% - 32px);color:var(--ink);box-shadow:0 30px 80px rgba(24,17,67,.3)}
 dialog::backdrop{background:rgba(24,17,67,.68)}
@@ -210,6 +244,15 @@ dialog p{margin:0 0 6px;color:var(--muted)}
 .view-tabs{grid-row:2;grid-column:1/3}
 .view-tabs a{flex:1;justify-content:center}
 .orders-view{padding-inline:14px}
+.bulk-import{grid-template-columns:auto minmax(0,1fr)}
+.bulk-import .bulk-button{grid-column:1/3;justify-self:start}
+.import-table thead{display:none}
+.import-table tr{display:grid;grid-template-columns:1fr auto;gap:6px 12px;padding:12px;border-top:1px solid var(--line)}
+.import-table td{border:0;padding:0}
+.import-table td[data-cell=name]{grid-column:1/3;max-width:none;min-width:0}
+.import-table td[data-cell=status]{grid-column:1/3}
+.import-status{min-width:0}
+.import-footer .primary-button{width:100%;min-width:0}
 .sent-orders li{grid-template-columns:1fr auto;padding:16px 18px}
 .sent-orders li span{grid-column:1/2;grid-row:2;font-size:13px}
 .sent-orders li em{grid-column:2;grid-row:2;justify-self:end}

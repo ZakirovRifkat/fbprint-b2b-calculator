@@ -85,6 +85,14 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
             </button>
           </article>
+          <!-- Большие заявки: свою таблицу клиента можно загрузить целиком, сайт проверит каждый тираж.
+               Файл перетаскивают на зону или выбирают кнопкой. -->
+          <div class="bulk-import" id="import-drop">
+            <svg class="bulk-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0-4 4m4-4 4 4M5 15v4h14v-4"/></svg>
+            <p><strong>Заявка из Excel</strong> — перетащите файл сюда</p>
+            <button class="bulk-button" id="import-file-button" type="button">Выбрать файл</button>
+            <input id="import-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+          </div>
         </div>
 
         <div class="step-block calculation" id="calculation-block" aria-disabled="true">
@@ -235,6 +243,30 @@
         <h2>Заявка отправлена</h2>
         <p>Номер заявки: <strong id="order-number"></strong>. Назовите его менеджеру, если будете уточнять детали.</p>
         <button class="primary-button primary-button--accent" id="order-done" type="button">Готово</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Загрузка заявки списком: файл Excel клиента, проверка каждой строки. -->
+  <dialog id="import-dialog">
+    <form method="dialog" id="import-form">
+      <button class="dialog-close" id="close-import-dialog" type="button" aria-label="Закрыть">×</button>
+      <div class="dialog-step" id="import-review">
+        <h2>Проверка заявки</h2>
+        <p id="import-summary"></p>
+        <div class="import-toolbar">
+          <button class="bulk-button" id="import-fix-all" type="button">Исправить все по рекомендациям</button>
+        </div>
+        <div class="import-table-wrap">
+          <table class="import-table">
+            <thead><tr><th>Компания и код</th><th>Наименование</th><th class="num">Тираж, шт.</th><th>Проверка</th><th class="num">Цена за шт.</th><th class="num">Сумма</th></tr></thead>
+            <tbody id="import-rows"></tbody>
+          </table>
+        </div>
+        <div class="import-footer">
+          <p id="import-skipped"></p>
+          <button class="primary-button primary-button--accent" id="import-add" type="button">Добавить в заявку</button>
+        </div>
       </div>
     </form>
   </dialog>

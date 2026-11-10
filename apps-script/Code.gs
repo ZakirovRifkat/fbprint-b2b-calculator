@@ -14,6 +14,8 @@
  */
 
 const ORDER_LIMIT = { count: 20, seconds: 600 };
+const MAX_LINES = 300; // клиенты загружают свои таблицы: в заказе бывает 60 позиций и больше
+const TELEGRAM_TEXT_LIMIT = 4000; // Telegram принимает до 4096 символов в сообщении
 const ORDERS_SHEET = 'Заявки';
 const SHIPPED = 'Отгружено';
 const TIME_ZONE = 'Europe/Moscow';
@@ -139,7 +141,7 @@ function doPost(e) {
 // Похожа ли заявка на настоящую. Персональных данных в ней нет: номер, компания и позиции.
 function validOrder(order) {
   const lines = Array.isArray(order.lines) ? order.lines : [];
-  if (!lines.length || lines.length > 50) return false;
+  if (!lines.length || lines.length > MAX_LINES) return false;
   if (!(Number(order.total) > 0)) return false;
   return lines.every(line => {
     const quantity = Number(line.quantity);
@@ -166,17 +168,40 @@ function orderMessage(order, check) {
       ? '⚠ Цены не совпадают с таблицей FB Print — проверьте перед счётом.'
       : '✅ Цены сверены с таблицей FB Print.';
 
-  const text = [
-    `Новая заявка ${field(order.number, 30)} с калькулятора FB Print`,
-    flagged ? `⚠ ВНИМАНИЕ: расхождения с таблицей в ${flagged} из ${lines.length} поз.` : null,
+  const header = `Новая заявка ${field(order.number, 30)} с калькулятора FB Print`;
+  const warning = flagged ? `⚠ ВНИМАНИЕ: расхождения с таблицей в ${flagged} из ${lines.length} поз.` : null;
+  const footer = [`Итого: ${moneyText(Number(order.total))}`, check.totalWarning || null, verdict];
+  const join = parts => parts.filter(line => line !== null).join('\n');
+  const text = join([header, warning, '', items.join('\n\n'), '', ...footer]);
+  if (text.length <= TELEGRAM_TEXT_LIMIT) return text;
+
+  // Большая заявка целиком в сообщение не влезает: сводка и позиции с расхождениями, полный список — в Excel.
+  const companies = [...new Set(lines.map(line => field(line.company, 100)))].join(', ');
+  const flaggedItems = lines
+    .map((line, index) => (check.warnings[index] ? `${index + 1}. ${field(line.sku, 50)} — ${check.warnings[index].replace(/\n/g, '; ')}` : null))
+    .filter(Boolean);
+  const summary = [
+    header,
+    warning,
     '',
-    items.join('\n\n'),
-    '',
-    `Итого: ${moneyText(Number(order.total))}`,
-    check.totalWarning || null,
-    verdict
-  ].filter(line => line !== null).join('\n');
-  return text.length > 4000 ? `${text.slice(0, 3990)}\n…` : text;
+    `Компания: ${companies}`,
+    `Позиций: ${lines.length}. Полный список — в файле Excel ниже.`,
+    flaggedItems.length ? '' : null,
+    flaggedItems.length ? 'Позиции с расхождениями:' : null
+  ];
+  const tail = ['', ...footer];
+  const room = TELEGRAM_TEXT_LIMIT - join([...summary, ...tail]).length - 60;
+  const listed = [];
+  let used = 0;
+  for (const item of flaggedItems) {
+    if (used + item.length + 1 > room) {
+      listed.push(`…и ещё ${flaggedItems.length - listed.length} — см. Excel`);
+      break;
+    }
+    listed.push(item);
+    used += item.length + 1;
+  }
+  return join([...summary, listed.length ? listed.join('\n') : null, ...tail]);
 }
 
 // Сверка цен с таблицей: клиент может подменить цены у себя в браузере, а скрипт — нет.
