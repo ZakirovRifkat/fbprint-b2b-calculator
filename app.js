@@ -78,6 +78,7 @@ let article = null;
 let order = [];
 let loadController = null;
 let loadedAt = null;
+let orderFooterVisible = false;
 
 function apiUrl() {
   return String(window.FBPRINT_CONFIG?.apiUrl ?? '').trim();
@@ -1078,6 +1079,18 @@ function renderOrder() {
   ['#clear-order', '#download-excel', '#submit-order'].forEach(selector => {
     $(selector).disabled = !order.length;
   });
+  renderDock();
+}
+
+// Полоса с итогом внизу экрана — пока в заявке есть позиции, а её собственный итог не виден.
+function renderDock() {
+  const visible = order.length > 0 && !orderFooterVisible && location.hash !== '#orders';
+  const dock = $('#order-dock');
+  dock.dataset.visible = String(visible);
+  dock.inert = !visible;
+  document.body.dataset.dock = String(visible);
+  $('#order-dock-count').textContent = `${order.length} ${plural(order.length, 'позиция', 'позиции', 'позиций')}`;
+  $('#order-dock-total').textContent = money.format(orderTotal());
 }
 
 function plural(value, one, few, many) {
@@ -1523,6 +1536,7 @@ function showView() {
     else tab.removeAttribute('aria-current');
   });
   document.title = view === 'orders' ? 'FB Print — Заявки' : 'FB Print — Расчёт стоимости';
+  renderDock();
 }
 
 function openOrderDialog() {
@@ -1865,6 +1879,21 @@ $('#clear-order').addEventListener('click', () => {
 });
 $('#download-excel').addEventListener('click', downloadExcel);
 $('#submit-order').addEventListener('click', openOrderDialog);
+$('#order-dock-submit').addEventListener('click', openOrderDialog);
+$('#order-dock-jump').addEventListener('click', () => {
+  document.querySelector('.order').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+});
+// Полоса не должна закрывать поле, на которое перешёл фокус с клавиатуры.
+document.addEventListener('focusin', event => {
+  const dock = $('#order-dock');
+  if (dock.dataset.visible !== 'true' || dock.contains(event.target)) return;
+  const overlap = event.target.getBoundingClientRect().bottom - dock.getBoundingClientRect().top + 16;
+  if (overlap > 0) window.scrollBy({ top: overlap, behavior: 'instant' });
+});
+new IntersectionObserver(([entry]) => {
+  orderFooterVisible = entry.isIntersecting;
+  renderDock();
+}).observe(document.querySelector('.order-footer'));
 $('#close-order-dialog').addEventListener('click', () => $('#order-dialog').close());
 $('#order-done').addEventListener('click', () => $('#order-dialog').close());
 $('#order-form').addEventListener('submit', event => {

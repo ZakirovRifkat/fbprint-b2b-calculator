@@ -241,6 +241,17 @@
         </div>
       </aside>
     </section>
+
+    <!-- Итог заявки внизу экрана: виден, пока заявка не пуста, а её собственный итог прокручен за край. -->
+    <div class="order-dock" id="order-dock" data-visible="false" inert>
+      <div class="order-dock-inner">
+        <button class="order-dock-summary" id="order-dock-jump" type="button">
+          <span><span id="order-dock-count"></span><span class="order-dock-hint"> · к заявке</span></span>
+          <strong id="order-dock-total"></strong>
+        </button>
+        <button class="primary-button primary-button--accent order-dock-submit" id="order-dock-submit" type="button">Отправить<span class="order-dock-long"> менеджеру</span></button>
+      </div>
+    </div>
   </main>
 
   <!-- Вкладка «Заявки»: заявки, отправленные из этого браузера. Хранятся в localStorage. -->
