@@ -1391,7 +1391,7 @@ function markImportedFile(name, count) {
   zone.dataset.state = 'loaded';
   const textNode = $('#import-drop-text');
   textNode.innerHTML = '';
-  textNode.append(cell('strong', 'Файл загружен'), ` — ${name} · ${count} ${plural(count, 'строка', 'строки', 'строк')}`);
+  textNode.append(cell('strong', 'Файл загружен:'), ` ${name} · ${count} ${plural(count, 'строка', 'строки', 'строк')}`);
   $('#import-file-button').textContent = 'Выбрать другой файл';
 }
 
