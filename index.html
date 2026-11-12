@@ -14,8 +14,8 @@
     <p>Загружаем каталог…</p>
   </div>
   <header class="site-header">
-    <a class="brand" href="#top" aria-label="FB-print, на главную">
-      <img src="assets/logo-full.svg" alt="FB-print" width="120" height="95">
+    <a class="brand" href="#top" aria-label="FB Print, на главную">
+      <img src="assets/logo-full.svg" alt="FB Print" width="120" height="95">
     </a>
     <nav class="view-tabs" aria-label="Разделы">
       <a href="#calc" data-view="calc" aria-current="page">Расчёт</a>
@@ -31,12 +31,8 @@
   <main id="top">
     <section class="intro" aria-labelledby="page-title">
       <div>
-        <h1 id="page-title">Расчёт стоимости</h1>
-        <p>Выберите компанию и артикул, укажите тираж. Система проверит условия производства и подготовит стоимость.</p>
-      </div>
-      <div class="intro-stamp" aria-hidden="true">
-        <span>Расчёт</span>
-        <strong>онлайн</strong>
+        <h1 id="page-title" tabindex="-1">Расчёт стоимости</h1>
+        <p>Выберите компанию и артикул, укажите тираж. Мы проверим его по условиям производства и посчитаем цену.</p>
       </div>
     </section>
 
@@ -52,7 +48,7 @@
           <div class="bulk-import" id="import-drop">
             <svg class="bulk-icon bulk-icon--upload" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0-4 4m4-4 4 4M5 15v4h14v-4"/></svg>
             <svg class="bulk-icon bulk-icon--done" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.8 2.8L16.5 9"/></svg>
-            <p id="import-drop-text" aria-live="polite"><strong>Заявка из Excel:</strong> перетащите файл сюда</p>
+            <p id="import-drop-text" aria-live="polite"><strong>Заявка из Excel</strong><span class="drop-hint">: перетащите файл сюда</span></p>
             <button class="bulk-button" id="import-file-button" type="button">Выбрать файл</button>
             <input id="import-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
           </div>
@@ -73,14 +69,14 @@
             <span class="step-number">2</span>
             <div>
               <h2>Артикул</h2>
-              <p>Введите номер или часть наименования этикетки.</p>
+              <p>Номер артикула или часть названия этикетки.</p>
             </div>
           </div>
           <div class="search-wrap">
             <label for="article-search">Поиск по каталогу</label>
             <div class="search-field">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
-              <input id="article-search" type="search" autocomplete="off" placeholder="Номер артикула или часть названия" aria-controls="search-results" aria-expanded="false">            </div>
+              <input id="article-search" type="search" autocomplete="off" placeholder="Например, 10165 или борщ" aria-controls="search-results" aria-expanded="false">            </div>
             <div class="search-results" id="search-results" role="listbox" hidden></div>
           </div>
           <article class="product" id="selected-product" hidden>
@@ -103,17 +99,17 @@
             <span class="step-number">3</span>
             <div>
               <h2>Тираж и стоимость</h2>
-              <p>Подскажем оптимальное количество до добавления в заявку.</p>
+              <p>Подскажем выгодный тираж до того, как вы добавите позицию в заявку.</p>
             </div>
           </div>
 
           <div class="calculation-grid">
             <div class="controls">
-              <label class="field-label" for="quantity">Количество, шт.</label>
+              <label class="field-label" for="quantity">Тираж, шт.</label>
               <div class="quantity-control">
-                <button type="button" id="quantity-minus" aria-label="Уменьшить количество" disabled>−</button>
+                <button type="button" id="quantity-minus" aria-label="Уменьшить тираж" disabled>−</button>
                 <input id="quantity" type="text" inputmode="numeric" pattern="[0-9 ]*" autocomplete="off" aria-describedby="condition" disabled>
-                <button type="button" id="quantity-plus" aria-label="Увеличить количество" disabled>+</button>
+                <button type="button" id="quantity-plus" aria-label="Увеличить тираж" disabled>+</button>
               </div>
 
               <fieldset class="urgency" disabled>
@@ -122,6 +118,7 @@
                 <label><input type="radio" name="urgency" value="urgent"><span>Срочный</span></label>
                 <label><input type="radio" name="urgency" value="emergency"><span>Экстренный</span></label>
               </fieldset>
+              <p class="urgency-note" id="urgency-note" hidden></p>
 
               <div class="condition" id="condition" data-state="idle" aria-live="polite">
                 <span class="condition-mark" aria-hidden="true"></span>
@@ -152,10 +149,10 @@
       <aside class="order" aria-labelledby="order-title">
         <div class="order-head">
           <div>
-            <h2 id="order-title">Ваша заявка</h2>
+            <h2 id="order-title">Заявка</h2>
             <p id="order-counter">Пока нет позиций</p>
           </div>
-          <button class="icon-button icon-button--danger" id="clear-order" type="button" aria-label="Очистить заявку" title="Очистить заявку" disabled>
+          <button class="icon-button icon-button--danger" id="clear-order" type="button" aria-label="Очистить заявку" title="Очистить заявку" hidden>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16m-10 4v6m4-6v6M9 7l1-3h4l1 3m-9 0 1 14h10l1-14"/></svg>
           </button>
         </div>
@@ -163,14 +160,14 @@
         <div class="order-empty" id="order-empty">
           <div class="empty-label" aria-hidden="true"></div>
           <strong>Здесь появятся выбранные этикетки</strong>
-          <p>Найдите артикул выше или загрузите заявку из Excel.</p>
+          <p>Найдите артикул в шаге 2 или загрузите заявку из Excel.</p>
         </div>
 
         <!-- Фильтры и сортировка — для больших заявок (от 6 позиций). -->
         <div class="order-tools" id="order-tools" hidden>
           <label class="order-search">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
-            <input id="order-search" type="search" autocomplete="off" placeholder="Код или название" aria-label="Найти в заявке по коду или названию">
+            <input id="order-search" type="search" autocomplete="off" placeholder="Артикул или название" aria-label="Найти в заявке по артикулу или названию">
           </label>
           <select id="order-filter-company" aria-label="Компания"><option value="">Все компании</option></select>
           <select id="order-filter-urgency" aria-label="Срок">
@@ -183,15 +180,15 @@
             <option value="">Любой тираж</option>
             <option value="issues">С замечаниями</option>
             <option value="reduced">Сниженный тираж</option>
-            <option value="multiple">Не кратно</option>
+            <option value="multiple">Не кратен</option>
           </select>
           <select id="order-sort-select" class="order-sort-select" aria-label="Сортировка">
-            <option value="">Порядок добавления</option>
-            <option value="code:1">Код ↑</option>
-            <option value="name:1">Наименование А–Я</option>
-            <option value="quantity:-1">Тираж: больше сначала</option>
-            <option value="total:-1">Сумма: больше сначала</option>
-            <option value="total:1">Сумма: меньше сначала</option>
+            <option value="">В порядке добавления</option>
+            <option value="code:1">По артикулу</option>
+            <option value="name:1">По названию</option>
+            <option value="quantity:-1">Сначала большие тиражи</option>
+            <option value="total:-1">Сначала дорогие</option>
+            <option value="total:1">Сначала дешёвые</option>
           </select>
           <button class="text-button" id="order-filter-reset" type="button" hidden>Сбросить</button>
         </div>
@@ -200,8 +197,8 @@
         <div class="order-table-wrap" id="order-table" hidden>
           <table class="order-table">
             <thead><tr>
-              <th data-sort="code"><button class="sort-button" type="button">Компания и код</button></th>
-              <th data-sort="name"><button class="sort-button" type="button">Наименование</button></th>
+              <th data-sort="code"><button class="sort-button" type="button">Компания и артикул</button></th>
+              <th data-sort="name"><button class="sort-button" type="button">Название</button></th>
               <th data-sort="quantity" class="num"><button class="sort-button" type="button">Тираж, шт.</button></th>
               <th data-sort="urgency"><button class="sort-button" type="button">Срок</button></th>
               <th data-sort="price" class="num"><button class="sort-button" type="button">Цена за шт.</button></th>
@@ -232,11 +229,11 @@
         <div class="order-footer">
           <div class="order-total"><span>Итого</span><strong id="order-total">0 ₽</strong></div>
           <p class="delivery-note" id="delivery-note" hidden></p>
-          <button class="secondary-button" id="download-excel" type="button" disabled>
+          <button class="secondary-button" id="download-excel" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/></svg>
             Скачать Excel
           </button>
-          <button class="primary-button primary-button--accent" id="submit-order" type="button" disabled>Отправить менеджеру</button>
+          <button class="primary-button primary-button--accent" id="submit-order" type="button">Отправить менеджеру</button>
           <p class="order-note">Менеджер подтвердит сроки и пришлёт счёт.</p>
         </div>
       </aside>
@@ -254,10 +251,10 @@
     </div>
   </main>
 
-  <!-- Вкладка «Заявки»: заявки, отправленные из этого браузера. Хранятся в localStorage. -->
+  <!-- Вкладка «Заявки»: заявки из таблицы (лист «Заявки»), новые сверху. -->
   <main class="orders-view" id="orders-view" aria-labelledby="orders-title" hidden>
     <div class="orders-head">
-      <h1 id="orders-title">Заявки</h1>
+      <h1 id="orders-title" tabindex="-1">Заявки</h1>
       <p>Все заявки, отправленные с калькулятора. Статус «Отгружено» ставит менеджер FB Print.</p>
     </div>
     <div class="orders-toolbar" id="orders-toolbar" hidden>
@@ -309,15 +306,15 @@
         <h2>Отправить заявку менеджеру?</h2>
         <p id="order-summary"></p>
         <p>Менеджер FB Print получит состав заявки и свяжется с вашей компанией. Контактные данные вводить не нужно.</p>
-        <p class="dialog-note" id="dialog-demo-note">Демонстрационный режим: заявка пока никуда не отправляется.</p>
+        <p class="dialog-note" id="dialog-demo-note">Демо-режим: заявка не уйдёт менеджеру.</p>
         <label class="form-trap" aria-hidden="true">Сайт<input name="website" tabindex="-1" autocomplete="off"></label>
         <p class="dialog-error" id="order-error" role="alert" hidden></p>
-        <button class="primary-button primary-button--accent" value="submit">Отправить заявку</button>
+        <button class="primary-button primary-button--accent" value="submit">Отправить</button>
       </div>
       <div class="dialog-step" id="order-sent" hidden>
         <h2>Заявка отправлена</h2>
         <p>Номер заявки: <strong id="order-number"></strong>. Назовите его менеджеру, если будете уточнять детали.</p>
-        <button class="primary-button primary-button--accent" id="order-done" type="button">Готово</button>
+        <button class="primary-button primary-button--accent" id="order-done" type="button">Закрыть</button>
       </div>
     </form>
   </dialog>
@@ -330,11 +327,11 @@
         <h2>Проверка заявки</h2>
         <p id="import-summary"></p>
         <div class="import-toolbar">
-          <button class="bulk-button" id="import-fix-all" type="button">Исправить все по рекомендациям</button>
+          <button class="bulk-button" id="import-fix-all" type="button">Исправить тиражи</button>
         </div>
         <div class="import-table-wrap">
           <table class="import-table">
-            <thead><tr><th>Компания и код</th><th>Наименование</th><th class="num">Тираж, шт.</th><th>Проверка</th><th class="num">Цена за шт.</th><th class="num">Сумма</th></tr></thead>
+            <thead><tr><th>Компания и артикул</th><th>Название</th><th class="num">Тираж, шт.</th><th>Проверка</th><th class="num">Цена за шт.</th><th class="num">Сумма</th></tr></thead>
             <tbody id="import-rows"></tbody>
           </table>
         </div>
@@ -346,7 +343,11 @@
     </form>
   </dialog>
 
-  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <div class="toast" id="toast" hidden>
+    <p id="toast-text" role="status" aria-live="polite"></p>
+    <button class="toast-action" id="toast-action" type="button" hidden></button>
+    <button class="toast-close" id="toast-close" type="button" aria-label="Закрыть уведомление" hidden>×</button>
+  </div>
   <script src="config.js"></script>
   <script src="app.js"></script>
 </body>

@@ -65,8 +65,8 @@ const urgencyLabels = {
   emergency: 'Экстренный'
 };
 const conditionLabels = {
-  good: 'Оптимальные условия',
-  multiple: 'Требуется корректировка кратности',
+  good: 'Тираж подходит',
+  multiple: 'Тираж не кратен',
   reduced: 'Сниженный тираж'
 };
 
@@ -75,7 +75,9 @@ const emptyCatalog = { schemaVersion: 1, version: '', companies: [], categories:
 let data = apiUrl() ? emptyCatalog : normalizeCatalog(demoCatalog);
 let companyId = data.companies[0]?.id ?? '';
 let article = null;
-let order = [];
+// Заявка хранится в браузере: перезагрузка и закрытие вкладки её не стирают.
+const orderKey = 'fbprint-order';
+let order = readSavedOrder();
 let loadController = null;
 let loadedAt = null;
 let orderFooterVisible = false;
@@ -138,18 +140,18 @@ function ensureUnique(items, key, describe) {
 
 function normalizeCatalog(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('API вернул каталог в неверном формате');
+    throw new Error('каталог пришёл в неверном формате');
   }
   if (raw.error) {
     throw new Error(String(raw.error.message ?? raw.error));
   }
   if (!Array.isArray(raw.companies) || !Array.isArray(raw.categories) || !Array.isArray(raw.articles)) {
-    throw new Error('В ответе API нужны массивы companies, categories и articles');
+    throw new Error('в каталоге нет списков компаний, категорий или артикулов');
   }
 
   const schemaVersion = Number(raw.schemaVersion ?? 1);
   if (schemaVersion !== 1) {
-    throw new Error(`Версия API ${schemaVersion} не поддерживается`);
+    throw new Error(`сайт не знает версию каталога ${schemaVersion}`);
   }
 
   const companies = raw.companies.map((company, index) => ({
@@ -164,7 +166,7 @@ function normalizeCatalog(raw) {
     const reducedRun = category?.reducedRun;
     return {
       id: text(category?.id, `${where}: «Категория»`),
-      size: text(category?.size, `${where}: «Размер этикетки»`),
+      size: text(category?.size, `${where}: «Размер этикетки»`).replace(/(\d)\s*[xхXХ*×]\s*(?=\d)/g, '$1 × '),
       color: text(category?.color, `${where}: «Цветность»`),
       minimumQuantity: number(category?.minimumQuantity, `${where}: «Минимальный тираж»`, { integerOnly: true }),
       rollQuantity: number(category?.rollQuantity, `${where}: «Кол-во в роле»`, { integerOnly: true, optional: true }),
@@ -195,7 +197,7 @@ function normalizeCatalog(raw) {
     };
   });
 
-  if (!companies.length || !categories.length) throw new Error('API вернул пустой каталог');
+  if (!companies.length || !categories.length) throw new Error('в каталоге нет компаний или категорий');
   ensureUnique(companies, item => item.id, item => `Компания ${item.id}`);
   ensureUnique(categories, item => item.id, item => `Лист «Категории»: категория ${item.id}`);
   ensureUnique(articles, item => `${item.companyId}/${item.sku}`, item => `Артикул ${item.sku} (${companyNames.get(item.companyId)})`);
@@ -256,7 +258,52 @@ function applyCatalog(nextData) {
   renderCompanies();
   renderSelected({ resetQuantity: false });
   renderSearch($('#article-search').value);
+  repriceOrder();
   renderOrder();
+}
+
+// Заявка хранится между заходами, а цены в таблице меняются.
+// После загрузки каталога каждая строка пересчитывается по текущим правилам.
+// Строку, которую больше нельзя заказать, помечаем: заявку с ней не отправить.
+function repriceOrder() {
+  if (!data.companies.length || !order.length) return;
+  let changed = 0;
+  order.forEach(line => {
+    const item = data.articles.find(entry => lineKey(entry) === line.key);
+    const category = item && categories().get(item.categoryId);
+    if (!category) {
+      line.problem = { label: 'Нет в каталоге', hint: 'Удалите позицию или спросите менеджера FB Print.' };
+      return;
+    }
+    const result = quote(line.quantity, category, line.quantity < category.minimumQuantity ? 'standard' : line.urgency);
+    if (!result.canAdd) {
+      line.problem = { label: 'Тираж мал', hint: `${result.message} Измените тираж или удалите позицию.` };
+      return;
+    }
+    delete line.problem;
+    if (result.unitPrice !== line.unitPrice || result.urgency !== line.urgency) changed += 1;
+    Object.assign(line, {
+      name: item.name,
+      size: category.size,
+      urgency: result.urgency,
+      unitPrice: result.unitPrice,
+      total: roundMoney(line.quantity * result.unitPrice),
+      status: result.status
+    });
+  });
+  const problems = order.filter(line => line.problem).length;
+  if (problems) {
+    toast(`${problems} ${plural(problems, 'позицию', 'позиции', 'позиций')} в заявке нельзя заказать: причина указана в строке.`, { persist: true });
+  } else if (changed) {
+    toast(`Цены в заявке обновлены: ${changed} ${plural(changed, 'позиция', 'позиции', 'позиций')}.`, { persist: true });
+  }
+}
+
+// Отправить и скачать заявку можно, только если каждую строку можно заказать.
+function orderHasProblems() {
+  if (!order.some(line => line.problem)) return false;
+  toast('В заявке есть позиции, которые нельзя заказать. Исправьте или удалите их.', { persist: true });
+  return true;
 }
 
 function showCatalogError(title, message) {
@@ -348,12 +395,20 @@ function closeLogin() {
   if ($('#login-dialog').open) $('#login-dialog').close();
 }
 
+// Ошибка с полем reason уже понятна клиенту (например, ошибка в таблице каталога).
+function failureReason(error) {
+  if (error.reason) return error.reason;
+  if (error.name === 'AbortError') return 'Сервер не ответил вовремя';
+  if (error.name === 'TypeError') return 'Нет связи с сервером';
+  return 'Сервер ответил с ошибкой';
+}
+
 async function loadData() {
   const url = apiUrl();
   if (!url) {
     showPageLoader(false);
     applyCatalog(normalizeCatalog(demoCatalog));
-    setDataStatus('demo', 'Демо-данные');
+    setDataStatus('demo', 'Демо-режим');
     loadOrders();
     return;
   }
@@ -385,12 +440,7 @@ async function loadData() {
     });
     if (!response.ok) throw new Error(`API ответил с кодом ${response.status}`);
 
-    let payload;
-    try {
-      payload = await response.json();
-    } catch {
-      throw new Error('API вернул не JSON');
-    }
+    const payload = await response.json();
     if (accessErrors.includes(payload?.error?.code)) {
       forgetPassword();
       applyCatalog(emptyCatalog);
@@ -401,9 +451,17 @@ async function loadData() {
     }
 
     closeLogin();
-    applyCatalog(normalizeCatalog(payload));
+    let catalog;
+    try {
+      catalog = normalizeCatalog(payload);
+    } catch (error) {
+      // Ошибку в таблице исправляет менеджер: место ошибки названо словами листа.
+      error.reason = `В таблице каталога ошибка (${error.message}). Сообщите об этом менеджеру FB Print`;
+      throw error;
+    }
+    applyCatalog(catalog);
     loadedAt = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-    setDataStatus('live', `Данные актуальны · ${loadedAt}`);
+    setDataStatus('live', `Обновлено в ${loadedAt}`);
     showCatalogError('');
     loadOrders();
   } catch (error) {
@@ -411,18 +469,17 @@ async function loadData() {
     if (controller !== loadController) return;
     // Пароль принят (или не проверен из-за сети) — ошибку каталога показываем на странице, а не в окне входа.
     closeLogin();
-    const message = error.name === 'AbortError'
-      ? 'API не ответил вовремя'
-      : error.message;
+    console.warn('Каталог не загружен:', error);
+    const reason = failureReason(error);
+    const advice = error.reason ? '' : ' Нажмите «Обновить» через минуту. Если не поможет, напишите менеджеру FB Print.';
     if (loadedAt) {
-      setDataStatus('error', `Не удалось обновить · данные от ${loadedAt}`);
-      showCatalogError('Не удалось обновить каталог', `${message}. Расчёт идёт по данным, загруженным в ${loadedAt}.`);
+      setDataStatus('error', `Не обновлено · данные от ${loadedAt}`);
+      showCatalogError('Каталог не обновился', `${reason}. Расчёт идёт по данным, загруженным в ${loadedAt}.${advice}`);
     } else {
       applyCatalog(emptyCatalog);
       setDataStatus('error', 'Каталог недоступен');
-      showCatalogError('Не удалось загрузить каталог', `${message}. Расчёт недоступен. Нажмите «Обновить» или сообщите менеджеру FB Print.`);
+      showCatalogError('Каталог не загрузился', `${reason}. Без каталога расчёт недоступен.${advice}`);
     }
-    toast('Ошибка загрузки каталога.');
   } finally {
     clearTimeout(timeout);
     // Запрос, отменённый более новым, экран не трогает — его уберёт новый запрос.
@@ -537,7 +594,7 @@ function inOrder(item) {
 
 function selectArticle(nextArticle) {
   if (inOrder(nextArticle)) {
-    toast('Этот артикул уже в заявке. Тираж можно изменить прямо в заявке.');
+    toast('Этот артикул уже в заявке, тираж меняется там.');
     return;
   }
   article = nextArticle;
@@ -562,7 +619,6 @@ function renderSelected({ resetQuantity = true } = {}) {
     $('#quantity').value = '';
     $('#quantity').placeholder = '';
     setCalculationDisabled(true);
-    $('#add-line').disabled = true;
     renderCalculation();
     return;
   }
@@ -577,9 +633,13 @@ function renderSelected({ resetQuantity = true } = {}) {
   $('#product-color').textContent = category.color;
   setCalculationDisabled(false);
   // При выборе артикула — минимальный тираж; без артикула поле пустое.
-  if (resetQuantity) $('#quantity').value = minimumValid(category);
+  if (resetQuantity) setQuantity(minimumValid(category));
   $('#quantity').placeholder = `от ${integer.format(category.reducedRun?.minQuantity ?? minimumValid(category))}`;
   renderCalculation();
+}
+
+function setQuantity(value) {
+  $('#quantity').value = value ? integer.format(value) : '';
 }
 
 function quantity() {
@@ -625,7 +685,7 @@ function quote(value, category, urgency) {
       tone: 'warning',
       status: 'reduced',
       title: 'Сниженный тираж',
-      message: `От ${integer.format(minimum)} шт. — ${money.format(standard)} за штуку. Срочный и экстренный заказ — от ${integer.format(minimum)} шт.`,
+      message: `От ${integer.format(minimum)} шт. — ${money.format(standard)} за штуку.`,
       benefit: saving > 0
         ? `Экономия ${money.format(saving)} на каждой штуке (−${Math.round(saving / reduced.price * 100)}%)`
         : null,
@@ -640,8 +700,8 @@ function quote(value, category, urgency) {
       ...base,
       status: 'multiple',
       tone: 'warning',
-      title: 'Тираж не соответствует кратности',
-      message: `Для оптимальных условий необходимо привести количество к кратному ${integer.format(category.multiple)}. Ближайшее допустимое значение — ${integer.format(next)} шт.`,
+      title: `Тираж не кратен ${integer.format(category.multiple)}`,
+      message: `Тираж должен делиться на ${integer.format(category.multiple)}. Ближайший подходящий — ${integer.format(next)} шт.`,
       suggested: next
     };
   }
@@ -649,8 +709,8 @@ function quote(value, category, urgency) {
     ...base,
     status: 'good',
     tone: 'good',
-    title: 'Соответствует оптимальным условиям',
-    message: `Тираж не ниже минимума и кратен ${integer.format(category.multiple)}.`,
+    title: 'Тираж подходит',
+    message: `Не меньше минимума и делится на ${integer.format(category.multiple)}.`,
     suggested: null
   };
 }
@@ -681,10 +741,10 @@ function renderEmptyQuantity(category) {
   const lowest = category.reducedRun?.minQuantity ?? minimumValid(category);
   document.querySelectorAll('[name=urgency]').forEach(input => {
     input.disabled = false;
-    delete input.parentElement.dataset.tooltip;
   });
+  $('#urgency-note').hidden = true;
   $('#condition').dataset.state = 'idle';
-  $('#condition-title').textContent = 'Укажите количество';
+  $('#condition-title').textContent = 'Укажите тираж';
   $('#condition-message').textContent = `Минимальный заказ — ${integer.format(lowest)} шт.`;
   $('#condition-benefit').hidden = true;
   $('#apply-suggestion').hidden = true;
@@ -692,12 +752,12 @@ function renderEmptyQuantity(category) {
   fitText($('#unit-price'));
   $('#line-quantity').textContent = '0 шт.';
   $('#line-total').textContent = '—';
-  $('#minimum-value').textContent = integer.format(category.minimumQuantity);
-  $('#multiple-value').textContent = integer.format(category.multiple);
+  $('#minimum-value').textContent = `${integer.format(category.minimumQuantity)} шт.`;
+  $('#multiple-value').textContent = `${integer.format(category.multiple)} шт.`;
   $('#reduced-value').textContent = category.reducedRun
-    ? `${integer.format(category.reducedRun.minQuantity)}–${integer.format(category.reducedRun.maxQuantity)}`
+    ? `${integer.format(category.reducedRun.minQuantity)}–${integer.format(category.reducedRun.maxQuantity)} шт.`
     : 'нет';
-  $('#add-line').disabled = true;
+  $('#add-line').disabled = inOrder(article);
   $('#add-line').textContent = inOrder(article) ? 'Уже в заявке' : 'Добавить в заявку';
 }
 
@@ -707,13 +767,10 @@ function syncUrgency(value, category) {
   document.querySelectorAll('[name=urgency]').forEach(input => {
     input.disabled = onlyStandard && input.value !== 'standard';
     if (input.disabled && input.checked) $('[name=urgency][value=standard]').checked = true;
-    // Подсказка, почему срок недоступен: при наведении и при нажатии (на телефоне).
-    if (input.disabled) {
-      input.parentElement.dataset.tooltip = `${urgencyLabels[input.value]} заказ — от минимального тиража ${integer.format(minimumValid(category))} шт.`;
-    } else {
-      delete input.parentElement.dataset.tooltip;
-    }
   });
+  // Почему срок недоступен — строкой под группой: на телефоне наведения нет.
+  $('#urgency-note').hidden = !onlyStandard;
+  $('#urgency-note').textContent = `Срочный и экстренный заказ — от ${integer.format(minimumValid(category))} шт.`;
 }
 
 function renderCalculation() {
@@ -721,6 +778,7 @@ function renderCalculation() {
   const apply = $('#apply-suggestion');
   if (!article) {
     condition.dataset.state = 'idle';
+    $('#urgency-note').hidden = true;
     $('#condition-benefit').hidden = true;
     $('#condition-title').textContent = 'Выберите артикул';
     $('#condition-message').textContent = 'После выбора появятся условия тиража.';
@@ -731,7 +789,8 @@ function renderCalculation() {
     $('#minimum-value').textContent = '—';
     $('#multiple-value').textContent = '—';
     $('#reduced-value').textContent = '—';
-    $('#add-line').disabled = true;
+    $('#add-line').disabled = false;
+    $('#add-line').textContent = 'Добавить в заявку';
     return;
   }
 
@@ -752,7 +811,7 @@ function renderCalculation() {
   if (result.suggested) {
     apply.textContent = `Применить ${integer.format(result.suggested)}`;
     apply.onclick = () => {
-      $('#quantity').value = result.suggested;
+      setQuantity(result.suggested);
       renderCalculation();
     };
   }
@@ -761,13 +820,13 @@ function renderCalculation() {
   fitText($('#unit-price'));
   $('#line-quantity').textContent = `${integer.format(value)} шт.`;
   $('#line-total').textContent = result.canAdd ? money.format(roundMoney(value * result.unitPrice)) : '—';
-  $('#minimum-value').textContent = integer.format(category.minimumQuantity);
-  $('#multiple-value').textContent = integer.format(category.multiple);
+  $('#minimum-value').textContent = `${integer.format(category.minimumQuantity)} шт.`;
+  $('#multiple-value').textContent = `${integer.format(category.multiple)} шт.`;
   $('#reduced-value').textContent = category.reducedRun
-    ? `${integer.format(category.reducedRun.minQuantity)}–${integer.format(category.reducedRun.maxQuantity)}`
+    ? `${integer.format(category.reducedRun.minQuantity)}–${integer.format(category.reducedRun.maxQuantity)} шт.`
     : 'нет';
   const added = inOrder(article);
-  $('#add-line').disabled = !result.canAdd || added;
+  $('#add-line').disabled = added;
   $('#add-line').textContent = added ? 'Уже в заявке' : 'Добавить в заявку';
 }
 
@@ -776,12 +835,22 @@ function createId() {
 }
 
 function addLine() {
-  if (!article) return;
+  if (!article) {
+    toast('Сначала выберите артикул.');
+    $('#article-search').focus();
+    return;
+  }
   const category = categories().get(article.categoryId);
   const value = quantity();
+  if (!value) {
+    toast('Укажите тираж.');
+    $('#quantity').focus();
+    return;
+  }
   const result = quote(value, category, selectedUrgency());
   if (!result.canAdd) {
     toast(result.message);
+    $('#quantity').focus();
     return;
   }
   if (inOrder(article)) {
@@ -800,13 +869,14 @@ function addLine() {
 }
 
 function lineNote(line) {
+  if (line.problem) return { ...line.problem, tone: 'danger' };
   if (line.status !== 'reduced' && line.status !== 'multiple') return null;
   const item = data.articles.find(entry => lineKey(entry) === line.key);
   const category = item && categories().get(item.categoryId);
   if (!category) return null;
   return line.status === 'reduced'
     ? { label: 'Сниженный тираж', hint: `От ${integer.format(minimumValid(category))} шт. — ${money.format(category.prices.standard)} за штуку` }
-    : { label: 'Не кратно', hint: `Кратность ${integer.format(category.multiple)} шт.` };
+    : { label: 'Не кратен', hint: `Кратность ${integer.format(category.multiple)} шт.` };
 }
 
 function makeLine(item, value, result) {
@@ -835,7 +905,7 @@ function changeLineQuantity(line, input) {
   const category = item && categories().get(item.categoryId);
   const restore = () => { input.value = integer.format(line.quantity); };
   if (!category) {
-    toast('Артикула больше нет в каталоге — тираж не изменить.');
+    toast('Артикула больше нет в каталоге, тираж не изменить.', { persist: true });
     restore();
     return;
   }
@@ -845,12 +915,13 @@ function changeLineQuantity(line, input) {
   }
   const result = quote(value, category, value < category.minimumQuantity ? 'standard' : line.urgency);
   if (!result.canAdd) {
-    toast(`${result.message} Тираж не изменён.`);
+    toast(`${result.message} Тираж не изменён.`, { persist: true });
     restore();
     return;
   }
   const urgencyDropped = result.urgency !== line.urgency;
   flashLineId = line.id;
+  delete line.problem;
   Object.assign(line, {
     quantity: value,
     urgency: result.urgency,
@@ -992,7 +1063,41 @@ function renderPager(shownCount) {
   root.append(button('›', orderPage + 1));
 }
 
+function readSavedOrder() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(orderKey) ?? '[]');
+    return Array.isArray(saved) ? saved.filter(line => line?.id && line.key && Number(line.quantity) > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveOrder() {
+  try {
+    localStorage.setItem(orderKey, JSON.stringify(order));
+  } catch {
+    // Хранилище недоступно (приватный режим) — заявка живёт до закрытия вкладки.
+  }
+}
+
+// Удаление обратимо: тост предлагает вернуть позиции на прежние места.
+function removeLines(lines, message) {
+  const removed = order.map((line, index) => ({ line, index })).filter(({ line }) => lines.includes(line));
+  order = order.filter(line => !lines.includes(line));
+  renderOrder();
+  toast(message, {
+    action: 'Вернуть',
+    onAction: () => {
+      removed.forEach(({ line, index }) => {
+        if (!order.some(item => item.key === line.key)) order.splice(Math.min(index, order.length), 0, line);
+      });
+      renderOrder();
+    }
+  });
+}
+
 function renderOrder() {
+  saveOrder();
   const empty = $('#order-empty');
   const root = $('#order-lines');
   empty.hidden = order.length > 0;
@@ -1025,7 +1130,7 @@ function renderOrder() {
     const note = lineNote(line);
     if (note) {
       const tag = cell('span', note.label);
-      tag.className = 'line-tag line-tag--warn';
+      tag.className = `line-tag line-tag--${note.tone ?? 'warn'}`;
       tag.title = note.hint;
       quantity.append(tag);
     }
@@ -1047,13 +1152,10 @@ function renderOrder() {
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'line-remove';
-    remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+    remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16m-10 4v6m4-6v6M9 7l1-3h4l1 3m-9 0 1 14h10l1-14"/></svg>';
     remove.title = 'Удалить позицию';
     remove.ariaLabel = `Удалить артикул ${line.sku}`;
-    remove.addEventListener('click', () => {
-      order = order.filter(item => item.id !== line.id);
-      renderOrder();
-    });
+    remove.addEventListener('click', () => removeLines([line], `Артикул ${line.sku} удалён из заявки.`));
     removeCell.append(remove);
 
     row.append(code, cell('td', line.name, 'name'), quantity, urgency, price, total, removeCell);
@@ -1076,9 +1178,7 @@ function renderOrder() {
   // Кнопка «Добавить» и пометки «Уже в заявке» зависят от состава заявки.
   renderCalculation();
   if (!$('#search-results').hidden) renderSearch($('#article-search').value);
-  ['#clear-order', '#download-excel', '#submit-order'].forEach(selector => {
-    $(selector).disabled = !order.length;
-  });
+  $('#clear-order').hidden = !order.length;
   renderDock();
 }
 
@@ -1134,7 +1234,7 @@ let importRows = [];
 const importLabels = {
   good: 'Подходит',
   reduced: 'Сниженный тираж',
-  multiple: 'Не кратно',
+  multiple: 'Не кратен',
   blocked: 'Меньше минимума',
   missing: 'Нет в каталоге',
   duplicate: 'Повтор',
@@ -1252,7 +1352,7 @@ function prepareImport(items) {
       if (elsewhere.length === 1) {
         found = elsewhere[0];
         rowCompany = found.companyId;
-        note = 'Компания определена по коду';
+        note = 'Компания определена по артикулу';
       }
     }
     const row = { id: index, companyId: rowCompany, sku: item.sku, article: found, quantity: item.quantity, urgency: item.urgency, source: item.source, note, duplicateOf: null };
@@ -1264,8 +1364,8 @@ function prepareImport(items) {
 }
 
 function evaluateImportRow(row) {
-  if (!row.article) return { kind: 'missing', canAdd: false, message: 'Проверьте код или попросите менеджера добавить артикул в каталог.' };
-  if (row.duplicateOf) return { kind: 'duplicate', canAdd: false, message: `Этот код уже есть выше (${row.duplicateOf.source}).` };
+  if (!row.article) return { kind: 'missing', canAdd: false, message: 'Проверьте артикул или попросите менеджера добавить его в каталог.' };
+  if (row.duplicateOf) return { kind: 'duplicate', canAdd: false, message: `Этот артикул уже есть выше (${row.duplicateOf.source}).` };
   if (inOrder(row.article)) return { kind: 'inOrder', canAdd: false, message: 'Тираж можно изменить в заявке.' };
   const category = categories().get(row.article.categoryId);
   const result = quote(row.quantity, category, row.quantity < category.minimumQuantity ? 'standard' : row.urgency);
@@ -1316,7 +1416,7 @@ function renderImport() {
     const input = document.createElement('input');
     input.inputMode = 'numeric';
     input.value = integer.format(row.quantity);
-    input.ariaLabel = `Тираж кода ${row.sku}`;
+    input.ariaLabel = `Тираж артикула ${row.sku}`;
     input.disabled = !row.article || Boolean(row.duplicateOf);
     input.addEventListener('change', () => applyImportSuggestion(row, quantityValue(input.value)));
     input.addEventListener('keydown', event => {
@@ -1333,7 +1433,7 @@ function renderImport() {
     box.className = 'import-status';
     box.append(cell('em', importLabels[result.kind]));
     if (result.kind !== 'good') box.append(cell('span', result.message));
-    if (result.urgencyDropped) box.append(cell('span', `${urgencyLabels[row.urgency]} срок — от минимального тиража, посчитано по стандартному.`));
+    if (result.urgencyDropped) box.append(cell('span', `${urgencyLabels[row.urgency]} заказ — только от минимального тиража. Посчитано как стандартный.`));
     if (row.note) box.append(cell('span', row.note));
     if (result.suggested && result.canAdd !== undefined && (fixable(result) || result.kind === 'reduced')) {
       const apply = document.createElement('button');
@@ -1360,10 +1460,10 @@ function renderImport() {
   $('#import-summary').textContent = `${importRows.length} ${plural(importRows.length, 'строка', 'строки', 'строк')}: ${parts.join(', ')}.`;
   const fixes = importRows.filter(row => fixable(evaluateImportRow(row))).length;
   $('#import-fix-all').disabled = !fixes;
-  $('#import-fix-all').textContent = fixes ? `Исправить все по рекомендациям (${fixes})` : 'Исправлять нечего';
+  $('#import-fix-all').textContent = fixes ? `Исправить тиражи (${fixes})` : 'Исправлять нечего';
   const skipped = importRows.length - addable;
   $('#import-skipped').textContent = skipped
-    ? `Не войдут в заявку: ${skipped} — нет в каталоге, повторы, уже в заявке или тираж меньше минимума.`
+    ? `${skipped} ${plural(skipped, 'строка не войдёт', 'строки не войдут', 'строк не войдут')} в заявку, причина указана в столбце «Проверка».`
     : 'Все строки можно добавить.';
   const add = $('#import-add');
   add.disabled = !addable;
@@ -1375,18 +1475,18 @@ function renderImport() {
 async function importFile(file) {
   if (!file) return;
   if (!data.articles.length) {
-    toast('Каталог ещё не загружен.');
+    toast('Каталог ещё загружается. Выберите файл через минуту.', { persist: true });
     return;
   }
   if (!/\.xlsx$/i.test(file.name)) {
-    toast('Нужен файл Excel в формате .xlsx.');
+    toast('Нужен файл Excel в формате .xlsx.', { persist: true });
     return;
   }
   toast('Читаем файл…');
   try {
     const items = await readImportFile(file);
     if (!items.length) {
-      toast('В файле не нашлось строк с кодом и тиражом. Нужны столбцы «Код» и «Тираж» (или «Заказ…, шт»).');
+      toast('В файле не нашлось строк с артикулом и тиражом. Нужны столбцы «Код» или «Артикул» и «Тираж» или «Количество».', { persist: true });
       return;
     }
     prepareImport(items);
@@ -1394,7 +1494,7 @@ async function importFile(file) {
     markImportedFile(file.name, items.length);
     $('#import-dialog').showModal();
   } catch (error) {
-    toast(error.message);
+    toast(error.message, { persist: true });
   }
 }
 
@@ -1468,6 +1568,7 @@ function renderOrders(list = ordersList) {
   });
   $('#orders-empty').hidden = !ordersLoaded || list.length > 0;
   $('#orders-toolbar').hidden = false;
+  $('.orders-filter').hidden = !list.length;
   root.hidden = !shown.length;
   $('#orders-none').hidden = !list.length || shown.length > 0;
   $('#orders-none').textContent = ordersFilter === 'shipped' ? 'Отгруженных заявок пока нет.' : 'Все заявки отгружены.';
@@ -1511,7 +1612,7 @@ async function loadOrders() {
     ordersList = payload.orders;
     ordersLoaded = true;
     renderOrders();
-    $('#orders-sync').textContent = `Обновлено · ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
+    $('#orders-sync').textContent = `Обновлено в ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
   } catch (error) {
     if (controller !== ordersController) return;
     ordersLoaded = true;
@@ -1540,6 +1641,11 @@ function showView() {
 }
 
 function openOrderDialog() {
+  if (!order.length) {
+    toast('Добавьте в заявку хотя бы одну позицию.');
+    return;
+  }
+  if (orderHasProblems()) return;
   const companies = [...new Set(order.map(line => line.company))].join(', ');
   $('#order-summary').textContent = `${order.length} ${plural(order.length, 'позиция', 'позиции', 'позиций')} на сумму ${money.format(orderTotal())}. Компания: ${companies}.`;
   $('#dialog-demo-note').hidden = Boolean(apiUrl());
@@ -1595,13 +1701,13 @@ async function submitOrder() {
       signal: controller.signal
     });
     if (!response.ok) throw new Error(`Сервер ответил с кодом ${response.status}`);
-    let result;
-    try {
-      result = await response.json();
-    } catch {
-      throw new Error('Сервер вернул не JSON');
+    const result = await response.json();
+    if (!result?.ok) {
+      // Отказ сервера (например, неверный пароль) Apps Script пишет словами клиента.
+      const refusal = new Error(result?.error?.code ?? 'ORDER_REJECTED');
+      refusal.reason = result?.error?.message;
+      throw refusal;
     }
-    if (!result?.ok) throw new Error(result?.error?.message ?? 'Заявка не отправлена');
 
     // Номер выдаёт Apps Script по листу «Заявки»: FB-0001 от 09.11.2026, FB-0002 от …
     const number = String(result.number ?? '');
@@ -1611,13 +1717,13 @@ async function submitOrder() {
     $('#order-sent').hidden = false;
     $('#order-done').focus();
   } catch (reason) {
-    const message = reason.name === 'AbortError' ? 'Сервер не ответил вовремя' : reason.message;
-    error.textContent = `${message}. Если не получится, скачайте Excel и отправьте его менеджеру.`;
+    console.warn('Заявка не отправлена:', reason);
+    error.textContent = `Заявка не отправлена: ${failureReason(reason).toLocaleLowerCase('ru-RU')}. Попробуйте ещё раз. Если не получится, скачайте Excel и отправьте его менеджеру.`;
     error.hidden = false;
   } finally {
     clearTimeout(timeout);
     button.disabled = false;
-    button.textContent = 'Отправить заявку';
+    button.textContent = 'Отправить';
   }
 }
 
@@ -1631,7 +1737,7 @@ function loadExcelJs() {
     script.onerror = () => {
       loadExcelJs.promise = null;
       script.remove();
-      reject(new Error('Не удалось загрузить модуль Excel'));
+      reject(new Error('Не удалось подготовить файл Excel: нет связи с сервером'));
     };
     document.head.append(script);
   });
@@ -1656,11 +1762,11 @@ function addCompanySheet(book, company, lines) {
     pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 }
   });
   sheet.columns = [
-    { header: 'Срочность', key: 'urgency', width: 14 },
+    { header: 'Срок', key: 'urgency', width: 14 },
     { header: 'Артикул', key: 'sku', width: 11 },
-    { header: 'Наименование', key: 'name', width: 60 },
+    { header: 'Название', key: 'name', width: 60 },
     { header: 'Тираж', key: 'quantity', width: 12 },
-    { header: 'Стоимость за шт.', key: 'unitPrice', width: 17 },
+    { header: 'Цена за шт.', key: 'unitPrice', width: 17 },
     { header: 'Итого', key: 'total', width: 16 },
     { header: 'Размер', key: 'size', width: 14, hidden: true }
   ];
@@ -1712,6 +1818,11 @@ async function orderFileBase64() {
 }
 
 async function downloadExcel() {
+  if (!order.length) {
+    toast('Добавьте в заявку хотя бы одну позицию.');
+    return;
+  }
+  if (orderHasProblems()) return;
   try {
     const book = await buildOrderWorkbook();
     const buffer = await book.xlsx.writeBuffer();
@@ -1726,21 +1837,48 @@ async function downloadExcel() {
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(link.href), 0);
-    toast('Excel-файл сформирован.');
+    toast('Файл Excel скачан.');
   } catch (error) {
-    toast(`${error.message}. Попробуйте ещё раз.`);
+    toast(`${error.message}. Попробуйте ещё раз.`, { persist: true });
   }
 }
 
-function toast(message) {
+// Обычный тост висит 5 секунд и замирает под курсором и фокусом.
+// Тост с ошибкой или кнопкой остаётся, пока его не закроют.
+function toast(message, { action = '', onAction = null, persist = false } = {}) {
   const element = $('#toast');
-  element.textContent = message;
+  const sticky = persist || Boolean(action);
+  $('#toast-text').textContent = message;
+  $('#toast-action').textContent = action;
+  $('#toast-action').hidden = !action;
+  $('#toast-close').hidden = !sticky;
+  toast.onAction = onAction;
+  element.dataset.sticky = String(sticky);
   element.hidden = false;
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => {
-    element.hidden = true;
-  }, 3200);
+  restartToastTimer();
 }
+
+function restartToastTimer() {
+  clearTimeout(toast.timer);
+  if ($('#toast').hidden || $('#toast').dataset.sticky === 'true') return;
+  toast.timer = setTimeout(hideToast, 5000);
+}
+
+function hideToast() {
+  clearTimeout(toast.timer);
+  $('#toast').hidden = true;
+}
+
+$('#toast').addEventListener('mouseenter', () => clearTimeout(toast.timer));
+$('#toast').addEventListener('focusin', () => clearTimeout(toast.timer));
+$('#toast').addEventListener('mouseleave', restartToastTimer);
+$('#toast').addEventListener('focusout', restartToastTimer);
+$('#toast-action').addEventListener('click', () => {
+  const action = toast.onAction;
+  hideToast();
+  action?.();
+});
+$('#toast-close').addEventListener('click', hideToast);
 
 $('#article-search').addEventListener('input', event => renderSearch(event.target.value));
 $('#article-search').addEventListener('focus', event => renderSearch(event.target.value));
@@ -1773,24 +1911,21 @@ $('#change-product').addEventListener('click', () => {
 });
 $('#quantity').addEventListener('input', renderCalculation);
 $('#quantity').addEventListener('blur', () => {
-  $('#quantity').value = quantity() || '';
+  setQuantity(quantity());
   renderCalculation();
 });
 $('#quantity-minus').addEventListener('click', () => {
   if (!article) return;
-  $('#quantity').value = stepQuantity(quantity(), categories().get(article.categoryId), -1);
+  setQuantity(stepQuantity(quantity(), categories().get(article.categoryId), -1));
   renderCalculation();
 });
 $('#quantity-plus').addEventListener('click', () => {
   if (!article) return;
-  $('#quantity').value = stepQuantity(quantity(), categories().get(article.categoryId), 1);
+  setQuantity(stepQuantity(quantity(), categories().get(article.categoryId), 1));
   renderCalculation();
 });
 document.querySelectorAll('[name=urgency]').forEach(input => {
   input.addEventListener('change', renderCalculation);
-  input.parentElement.addEventListener('click', () => {
-    if (input.disabled && input.parentElement.dataset.tooltip) toast(input.parentElement.dataset.tooltip);
-  });
 });
 $('#add-line').addEventListener('click', addLine);
 $('#import-file-button').addEventListener('click', () => $('#import-file').click());
@@ -1872,11 +2007,7 @@ $('#order-page-size').addEventListener('change', event => {
   renderOrder();
 });
 $('#close-import-dialog').addEventListener('click', () => $('#import-dialog').close());
-$('#clear-order').addEventListener('click', () => {
-  order = [];
-  renderOrder();
-  toast('Заявка очищена.');
-});
+$('#clear-order').addEventListener('click', () => removeLines(order.slice(), 'Заявка очищена.'));
 $('#download-excel').addEventListener('click', downloadExcel);
 $('#submit-order').addEventListener('click', openOrderDialog);
 $('#order-dock-submit').addEventListener('click', openOrderDialog);
@@ -1895,6 +2026,9 @@ new IntersectionObserver(([entry]) => {
   renderDock();
 }).observe(document.querySelector('.order-footer'));
 $('#close-order-dialog').addEventListener('click', () => $('#order-dialog').close());
+$('#order-dialog').addEventListener('click', event => {
+  if (event.target === event.currentTarget) event.currentTarget.close();
+});
 $('#order-done').addEventListener('click', () => $('#order-dialog').close());
 $('#order-form').addEventListener('submit', event => {
   if (event.submitter?.value !== 'submit') return;
@@ -1904,7 +2038,7 @@ $('#order-form').addEventListener('submit', event => {
     return;
   }
   $('#order-dialog').close();
-  toast('Демонстрация: отправка менеджеру пока не подключена.');
+  toast('Демо-режим: заявка не отправлена менеджеру.');
 });
 $('#refresh-data').addEventListener('click', loadData);
 $('#login-form').addEventListener('submit', event => {
@@ -1933,6 +2067,7 @@ showView();
 window.addEventListener('hashchange', () => {
   showView();
   window.scrollTo(0, 0);
+  $(location.hash === '#orders' ? '#orders-title' : '#page-title').focus({ preventScroll: true });
   if (location.hash === '#orders') loadOrders();
 });
 document.querySelectorAll('.orders-filter button').forEach(button => button.addEventListener('click', () => {
