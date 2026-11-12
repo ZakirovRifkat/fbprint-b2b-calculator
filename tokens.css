@@ -1,0 +1,153 @@
+/* Переменные дизайна FB Print. style.css берёт значения только отсюда.
+   Исключения — разовая геометрия одного элемента (размер логотипа, вырезы билета, пустая этикетка)
+   и точки перелома в @media: переменные там не работают (1050, 720 и 420 px). */
+:root{
+  /* Цвета бренда */
+  --ink:#181143;
+  --ink-2:#2a2260;
+  --pink:#e4007c;
+  --pink-dark:#960666;
+  --pink-bg:#fdeef6;
+  --cyan:#00a7e1;
+  --yellow:#ffc600;
+  --lilac:#b9b5d9;
+
+  /* Фон и поверхности */
+  --paper:#f6f5f1;
+  --paper-soft:#fbfaf7;
+  --white:#fff;
+  --tint:#f1eff7;
+  --tint-strong:#e5e1ef;
+  --tint-soft:#faf9fc;
+
+  /* Текст и линии */
+  --muted:#646080;
+  --line:#dedbd1;
+  --line-soft:#ece9e1;
+  --line-strong:#c9c5d9;
+  --field-line:#807b9c;
+
+  /* На тёмном фоне (билет цены, полоса заявки, тост) */
+  --on-ink-soft:#c9c5e4;
+  --on-ink-line:#736e97;
+  --on-ink-track:rgba(255,255,255,.2);
+  --on-ink-track-strong:rgba(255,255,255,.35);
+
+  /* Состояния */
+  --focus:#0072a3;
+  --good:#167c5a;
+  --good-bg:#e9f5f0;
+  --good-line:#b7dccd;
+  --warn:#a85900;
+  --warn-bg:#fff4df;
+  --danger:#b42318;
+  --danger-bg:#fff0ed;
+  --danger-line:#f2c4bf;
+
+  /* Шрифты */
+  --font-body:Golos,system-ui,sans-serif;
+  --font-display:Unbounded,sans-serif;
+  --weight-regular:400;
+  --weight-bold:700;
+
+  /* Кегли: подпись, вспомогательный, основной, заголовок, крупная сумма, заголовок страницы */
+  --text-xs:0.75rem;
+  --text-sm:0.875rem;
+  --text-md:1rem;
+  --text-lg:1.375rem;
+  --text-xl:2.375rem;
+  --text-display:clamp(2.5rem,4.6vw,4rem);
+  --text-display-sm:2.25rem;
+  --text-glyph:1.5rem;
+
+  --leading-body:1.45;
+  --leading-snug:1.35;
+  --leading-control:1.4;
+  --leading-display:1.04;
+  --tracking-display:-.035em;
+  --tracking-heading:-.02em;
+  --tracking-caps:.05em;
+
+  /* Отступы: шаг 4 px */
+  --space-0-5:2px;
+  --space-1:4px;
+  --space-2:8px;
+  --space-3:12px;
+  --space-4:16px;
+  --space-5:20px;
+  --space-6:24px;
+  --space-7:28px;
+  --space-8:32px;
+  --space-9:36px;
+  --space-10:40px;
+  --space-24:96px;
+
+  /* Сетка страницы */
+  --shell:1240px;
+  --gutter:clamp(16px,5vw,72px);
+  --head-top:var(--space-6);
+  --head-bottom:var(--space-10);
+  --pad-section:clamp(24px,4vw,52px);
+  --pad-card:clamp(20px,3vw,40px);
+  --ticket-width:300px;
+  --dialog-width:520px;
+  --dialog-wide:1120px;
+  --dock-space:96px;
+  --action-width:260px;
+
+  /* Высота элементов управления */
+  --control:40px;
+  --tap:44px;
+  --control-lg:48px;
+  --field-lg:62px;
+
+  /* Иконки */
+  --icon-sm:18px;
+  --icon-md:21px;
+  --icon-lg:26px;
+  --icon-stroke:1.8;
+
+  /* Радиусы: мелкая кнопка, поле и кнопка, карточка, пилюля, круг */
+  --radius-sm:8px;
+  --radius:12px;
+  --radius-lg:24px;
+  --radius-pill:999px;
+  --radius-round:50%;
+
+  /* Линии */
+  --border:1px solid var(--line);
+  --border-soft:1px solid var(--line-soft);
+  --border-field:1px solid var(--field-line);
+  --border-field-strong:1.5px solid var(--field-line);
+
+  /* Фокус */
+  --focus-ring:3px solid var(--focus);
+  --focus-offset:3px;
+  --field-focus:inset 0 0 0 1px var(--ink);
+
+  /* Тени: цвет бренда с прозрачностью */
+  --shadow-popover:0 18px 40px rgba(24,17,67,.12);
+  --shadow-toast:0 12px 30px rgba(24,17,67,.25);
+  --shadow-dock:0 -8px 24px rgba(24,17,67,.16);
+  --shadow-dialog:0 30px 80px rgba(24,17,67,.3);
+  --backdrop:rgba(24,17,67,.68);
+
+  /* Прозрачность */
+  --disabled-opacity:.45;
+  --hint-opacity:.35;
+
+  /* Слои */
+  --z-sticky:1;
+  --z-popover:10;
+  --z-dock:20;
+  --z-toast:30;
+  --z-loader:50;
+
+  /* Движение */
+  --ease:cubic-bezier(.16,1,.3,1);
+  --duration-fast:.2s;
+  --duration-dock:.32s;
+  --duration-flash:1.4s;
+  --duration-spin:.8s;
+  --duration-pulse:1.1s;
+}
