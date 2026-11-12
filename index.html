@@ -320,6 +320,20 @@
     </form>
   </dialog>
 
+  <!-- Подтверждение удаления. Открывается поверх других окон; Esc и «Отмена» ничего не удаляют. -->
+  <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <form method="dialog">
+      <div class="dialog-step">
+        <h2 id="confirm-title"></h2>
+        <p id="confirm-message"></p>
+        <div class="dialog-actions">
+          <button class="secondary-button" value="cancel" autofocus>Отмена</button>
+          <button class="primary-button primary-button--danger" value="confirm" id="confirm-ok"></button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Загрузка заявки списком: файл Excel клиента, проверка каждой строки. -->
   <dialog id="import-dialog">
     <form method="dialog" id="import-form">
@@ -329,10 +343,12 @@
         <p id="import-summary"></p>
         <div class="import-toolbar">
           <button class="bulk-button" id="import-fix-all" type="button">Исправить тиражи</button>
+          <!-- Отмена удаления — здесь, а не в тосте: тост остаётся под окном и не нажимается. -->
+          <p class="import-undo" id="import-undo" role="status" hidden><span id="import-undo-text"></span><button class="text-button" id="import-undo-button" type="button">Вернуть</button></p>
         </div>
         <div class="import-table-wrap">
           <table class="import-table">
-            <thead><tr><th>Компания и артикул</th><th>Название</th><th class="num">Тираж, шт.</th><th>Проверка</th><th class="num">Цена за шт.</th><th class="num">Сумма</th></tr></thead>
+            <thead><tr><th><span class="visually-hidden">Удалить</span></th><th>Компания и артикул</th><th>Название</th><th class="num">Тираж, шт.</th><th>Проверка</th><th class="num">Цена за шт.</th><th class="num">Сумма</th></tr></thead>
             <tbody id="import-rows"></tbody>
           </table>
         </div>

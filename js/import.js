@@ -7,6 +7,7 @@ import { inOrder } from './calculator.js';
 import { clearOrderFilters, makeLine, renderOrder } from './order.js';
 import { loadExcelJs } from './excel.js';
 import { toast } from './toast.js';
+import { confirmAction } from './confirm.js';
 
 // Загрузка заявки списком: файл Excel клиента — перетаскиванием на зону или кнопкой «Выбрать файл».
 // Формат таблицы свободный: сайт ищет строку заголовков с «Код» (или «Артикул») и столбец тиража
@@ -137,12 +138,63 @@ export function prepareImport(items) {
         note = 'Компания определена по артикулу';
       }
     }
-    const row = { id: index, companyId: rowCompany, sku: item.sku, article: found, quantity: item.quantity, urgency: item.urgency, source: item.source, note, duplicateOf: null };
-    const key = `${rowCompany}/${item.sku}`;
-    if (found && seen.has(key)) row.duplicateOf = seen.get(key);
-    else seen.set(key, row);
-    return row;
+    return { id: index, companyId: rowCompany, sku: item.sku, article: found, quantity: item.quantity, urgency: item.urgency, source: item.source, note, duplicateOf: null };
   });
+  removedImportRows.length = 0;
+  markDuplicates();
+}
+
+// Повтор — второй и следующие раз встреченный артикул. После удаления строки повторы считаются заново:
+// если удалили первую, её место занимает следующая такая же.
+function markDuplicates() {
+  const seen = new Map();
+  state.importRows.forEach(row => {
+    row.duplicateOf = null;
+    if (!row.article) return;
+    const key = `${row.companyId}/${row.sku}`;
+    if (seen.has(key)) row.duplicateOf = seen.get(key);
+    else seen.set(key, row);
+  });
+}
+
+// Удалённые строки — стопкой: «Вернуть» возвращает последнюю на прежнее место.
+const removedImportRows = [];
+
+async function removeImportRow(row) {
+  const confirmed = await confirmAction({
+    title: 'Удалить строку?',
+    message: `Артикул ${row.sku}${row.article ? ` — ${row.article.name}` : ''}, ${row.source}. Строка не попадёт в заявку.`,
+    confirmLabel: 'Удалить'
+  });
+  if (!confirmed) {
+    $('#import-rows').querySelectorAll('.line-remove')[state.importRows.indexOf(row)]?.focus();
+    return;
+  }
+  const index = state.importRows.indexOf(row);
+  state.importRows.splice(index, 1);
+  removedImportRows.push({ row, index });
+  markDuplicates();
+  renderImport();
+  // Фокус — на корзину строки, вставшей на место удалённой, иначе на «Вернуть».
+  const next = $('#import-rows').querySelectorAll('.line-remove')[index] ?? $('#import-undo-button');
+  next.focus();
+}
+
+export function restoreImportRow() {
+  const last = removedImportRows.pop();
+  if (!last) return;
+  state.importRows.splice(Math.min(last.index, state.importRows.length), 0, last.row);
+  markDuplicates();
+  renderImport();
+  if (!removedImportRows.length) $('#import-rows').querySelectorAll('.line-remove')[last.index]?.focus();
+}
+
+function renderImportUndo() {
+  const last = removedImportRows.at(-1);
+  $('#import-undo').hidden = !last;
+  if (!last) return;
+  const more = removedImportRows.length - 1;
+  $('#import-undo-text').textContent = `Строка с артикулом ${last.row.sku} удалена${more ? ` (всего удалено: ${removedImportRows.length})` : ''}.`;
 }
 
 export function evaluateImportRow(row) {
@@ -195,6 +247,7 @@ export function renderImport() {
 
     const quantity = document.createElement('td');
     quantity.className = 'num';
+    quantity.dataset.cell = 'quantity';
     const input = document.createElement('input');
     input.inputMode = 'numeric';
     input.value = integer.format(row.quantity);
@@ -228,24 +281,40 @@ export function renderImport() {
     }
     status.append(box);
 
-    const price = cell('td', result.canAdd ? money.format(result.unitPrice) : '—');
+    const price = cell('td', result.canAdd ? money.format(result.unitPrice) : '—', 'price');
     price.className = 'num';
-    const sum = cell('td', result.canAdd ? money.format(roundMoney(row.quantity * result.unitPrice)) : '—');
+    const sum = cell('td', result.canAdd ? money.format(roundMoney(row.quantity * result.unitPrice)) : '—', 'sum');
     sum.className = 'num';
-    tr.append(code, cell('td', row.article?.name ?? '—', 'name'), quantity, status, price, sum);
+    const removeCell = document.createElement('td');
+    removeCell.dataset.cell = 'remove';
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'line-remove';
+    remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+    remove.title = 'Удалить строку';
+    remove.ariaLabel = `Удалить строку с артикулом ${row.sku}`;
+    remove.addEventListener('click', () => removeImportRow(row));
+    removeCell.append(remove);
+
+    tr.append(removeCell, code, cell('td', row.article?.name ?? '—', 'name'), quantity, status, price, sum);
     body.append(tr);
   });
+  renderImportUndo();
 
   const parts = ['good', 'reduced', 'multiple', 'blocked', 'missing', 'duplicate', 'inOrder']
     .filter(kind => counts[kind])
     .map(kind => `${importLabels[kind].toLocaleLowerCase('ru-RU')} — ${counts[kind]}`);
-  $('#import-summary').textContent = `${state.importRows.length} ${plural(state.importRows.length, 'строка', 'строки', 'строк')}: ${parts.join(', ')}.`;
+  $('#import-summary').textContent = state.importRows.length
+    ? `${state.importRows.length} ${plural(state.importRows.length, 'строка', 'строки', 'строк')}: ${parts.join(', ')}.`
+    : 'Все строки удалены.';
   const fixes = state.importRows.filter(row => fixable(evaluateImportRow(row))).length;
   $('#import-fix-all').disabled = !fixes;
   $('#import-fix-all').textContent = fixes ? `Исправить тиражи (${fixes})` : 'Исправлять нечего';
   const skipped = state.importRows.length - addable;
-  $('#import-skipped').textContent = skipped
-    ? `${skipped} ${plural(skipped, 'строка не войдёт', 'строки не войдут', 'строк не войдут')} в заявку, причина указана в столбце «Проверка».`
+  $('#import-skipped').textContent = !state.importRows.length
+    ? ''
+    : skipped
+    ?`${skipped} ${plural(skipped, 'строка не войдёт', 'строки не войдут', 'строк не войдут')} в заявку, причина указана в столбце «Проверка».`
     : 'Все строки можно добавить.';
   const add = $('#import-add');
   add.disabled = !addable;

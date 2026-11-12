@@ -7,11 +7,12 @@ import { rememberPassword, setLoginBusy, showPassword } from './auth.js';
 import { apiUrl, applyCatalog, loadData } from './load.js';
 import { addLine, hideSearch, quantity, renderCalculation, renderSearch, renderSelected, setQuantity } from './calculator.js';
 import { orderFilter, readSavedOrder, removeLines, renderDock, renderOrder, resetOrderFilters } from './order.js';
-import { addImportedLines, evaluateImportRow, fixable, importFile, renderImport } from './import.js';
+import { addImportedLines, evaluateImportRow, fixable, importFile, renderImport, restoreImportRow } from './import.js';
 import { loadOrders, renderOrders, showView } from './orders.js';
 import { openOrderDialog, submitOrder } from './submit.js';
 import { downloadExcel } from './excel.js';
 import { hideToast, restartToastTimer, toast } from './toast.js';
+import { initConfirm } from './confirm.js';
 
 // Раньше заявки хранились в браузере; теперь они в таблице, старую копию убираем.
 try {
@@ -130,6 +131,8 @@ $('#import-fix-all').addEventListener('click', () => {
   renderImport();
 });
 $('#import-add').addEventListener('click', addImportedLines);
+$('#import-undo-button').addEventListener('click', restoreImportRow);
+initConfirm();
 $('#order-search').addEventListener('input', event => {
   orderFilter.query = event.target.value;
   state.orderPage = 1;

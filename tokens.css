@@ -41,6 +41,7 @@
   --warn:#a85900;
   --warn-bg:#fff4df;
   --danger:#b42318;
+  --danger-dark:#8a1a12;
   --danger-bg:#fff0ed;
   --danger-line:#f2c4bf;
 
@@ -91,6 +92,7 @@
   --pad-card:clamp(20px,3vw,40px);
   --ticket-width:300px;
   --dialog-width:520px;
+  --confirm-width:420px;
   --dialog-wide:1120px;
   --dock-space:96px;
   --action-width:260px;
