@@ -9,7 +9,7 @@ import { addLine, hideSearch, quantity, renderCalculation, renderSearch, renderS
 import { clearOrderWithConfirm, orderFilter, readSavedOrder, renderDock, renderOrder, resetOrderFilters } from './order.js';
 import { addImportedLines, evaluateImportRow, fixable, importFile, renderImport, restoreImportRow } from './import.js';
 import { loadOrders, renderOrders, showView } from './orders.js';
-import { openOrderDialog, submitOrder } from './submit.js';
+import { openOrderDialog, orderSending, submitOrder } from './submit.js';
 import { downloadExcel } from './excel.js';
 import { hideToast, restartToastTimer, toast } from './toast.js';
 import { initConfirm } from './confirm.js';
@@ -186,7 +186,11 @@ new IntersectionObserver(([entry]) => {
 }).observe(document.querySelector('.order-footer'));
 $('#close-order-dialog').addEventListener('click', () => $('#order-dialog').close());
 $('#order-dialog').addEventListener('click', event => {
-  if (event.target === event.currentTarget) event.currentTarget.close();
+  if (event.target === event.currentTarget && !orderSending()) event.currentTarget.close();
+});
+// Esc во время отправки окно не закрывает.
+$('#order-dialog').addEventListener('cancel', event => {
+  if (orderSending()) event.preventDefault();
 });
 $('#order-done').addEventListener('click', () => $('#order-dialog').close());
 $('#order-form').addEventListener('submit', event => {
