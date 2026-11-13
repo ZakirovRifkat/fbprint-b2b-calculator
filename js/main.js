@@ -6,7 +6,7 @@ import { categories, demoCatalog, emptyCatalog, normalizeCatalog } from './catal
 import { rememberPassword, setLoginBusy, showPassword } from './auth.js';
 import { apiUrl, applyCatalog, loadData } from './load.js';
 import { addLine, hideSearch, quantity, renderCalculation, renderSearch, renderSelected, setQuantity } from './calculator.js';
-import { orderFilter, readSavedOrder, removeLines, renderDock, renderOrder, resetOrderFilters } from './order.js';
+import { clearOrderWithConfirm, orderFilter, readSavedOrder, renderDock, renderOrder, resetOrderFilters } from './order.js';
 import { addImportedLines, evaluateImportRow, fixable, importFile, renderImport, restoreImportRow } from './import.js';
 import { loadOrders, renderOrders, showView } from './orders.js';
 import { openOrderDialog, submitOrder } from './submit.js';
@@ -166,7 +166,7 @@ $('#order-page-size').addEventListener('change', event => {
   renderOrder();
 });
 $('#close-import-dialog').addEventListener('click', () => $('#import-dialog').close());
-$('#clear-order').addEventListener('click', () => removeLines(state.order.slice(), 'Заявка очищена.'));
+$('#clear-order').addEventListener('click', clearOrderWithConfirm);
 $('#download-excel').addEventListener('click', downloadExcel);
 $('#submit-order').addEventListener('click', openOrderDialog);
 $('#order-dock-submit').addEventListener('click', openOrderDialog);

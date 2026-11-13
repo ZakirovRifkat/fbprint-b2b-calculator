@@ -276,8 +276,27 @@ async function removeLineWithConfirm(line) {
     return;
   }
   removeLines([line], `Артикул ${line.sku} удалён из заявки.`);
-  // Фокус — на крестик строки, вставшей на место удалённой, иначе на кнопку очистки заявки.
-  (buttons()[index] ?? buttons().at(-1) ?? $('#clear-order'))?.focus();
+  // Фокус — на крестик строки, вставшей на место удалённой, иначе на «Вернуть» в тосте.
+  (buttons()[index] ?? buttons().at(-1) ?? $('#toast-action'))?.focus();
+}
+
+// Очистка всей заявки — тоже через подтверждение. После неё фокус на «Вернуть» в тосте:
+// кнопка очистки исчезает вместе со строками.
+export async function clearOrderWithConfirm() {
+  const count = state.order.length;
+  if (!count) return;
+  const sum = roundMoney(state.order.reduce((total, line) => total + line.total, 0));
+  const confirmed = await confirmAction({
+    title: 'Очистить заявку?',
+    message: `${count} ${plural(count, 'позиция', 'позиции', 'позиций')} на ${money.format(sum)} ${plural(count, 'пропадёт', 'пропадут', 'пропадут')} из заявки.`,
+    confirmLabel: 'Очистить'
+  });
+  if (!confirmed) {
+    $('#clear-order').focus();
+    return;
+  }
+  removeLines(state.order.slice(), 'Заявка очищена.');
+  $('#toast-action').focus();
 }
 
 // Удаление обратимо: тост предлагает вернуть позиции на прежние места.
