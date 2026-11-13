@@ -49,7 +49,9 @@
   --font-body:Golos,system-ui,sans-serif;
   --font-display:Unbounded,sans-serif;
   --weight-regular:400;
-  --weight-bold:700;
+  --weight-medium:500;
+  --weight-bold:600;
+  --weight-display:700;
 
   /* Кегли: подпись, вспомогательный, основной, заголовок, крупная сумма, заголовок страницы */
   --text-xs:0.75rem;
@@ -90,7 +92,7 @@
   --head-bottom:var(--space-10);
   --pad-section:clamp(24px,4vw,52px);
   --pad-card:clamp(20px,3vw,40px);
-  --ticket-width:300px;
+  --ticket-width:320px;
   --dialog-width:520px;
   --confirm-width:420px;
   --dialog-wide:1120px;

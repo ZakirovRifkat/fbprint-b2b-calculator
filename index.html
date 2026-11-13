@@ -198,13 +198,13 @@
         <div class="order-table-wrap" id="order-table" hidden>
           <table class="order-table">
             <thead><tr>
+              <th><span class="visually-hidden">Удалить</span></th>
               <th data-sort="code"><button class="sort-button" type="button">Компания и артикул</button></th>
               <th data-sort="name"><button class="sort-button" type="button">Название</button></th>
               <th data-sort="quantity" class="num"><button class="sort-button" type="button">Тираж, шт.</button></th>
               <th data-sort="urgency"><button class="sort-button" type="button">Срок</button></th>
               <th data-sort="price" class="num"><button class="sort-button" type="button">Цена за шт.</button></th>
               <th data-sort="total" class="num"><button class="sort-button" type="button">Сумма</button></th>
-              <th><span class="visually-hidden">Удалить</span></th>
             </tr></thead>
             <tbody id="order-lines"></tbody>
           </table>
@@ -231,7 +231,7 @@
           <div class="order-total"><span>Итого</span><strong id="order-total">0 ₽</strong></div>
           <p class="delivery-note" id="delivery-note" hidden></p>
           <button class="secondary-button" id="download-excel" type="button">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14"/></svg>
+            <svg viewBox="4 0 16 24" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"/></svg>
             Скачать Excel
           </button>
           <button class="primary-button primary-button--accent" id="submit-order" type="button">Отправить менеджеру</button>

@@ -5,6 +5,7 @@ import { freeDeliveryFrom, minimumValid, quote, urgencyLabels } from './pricing.
 import { categories } from './catalog.js';
 import { lineKey, renderCalculation, renderSearch, searchKey } from './calculator.js';
 import { toast } from './toast.js';
+import { confirmAction } from './confirm.js';
 
 // Заявка хранится в браузере: перезагрузка и закрытие вкладки её не стирают.
 export const orderKey = 'fbprint-order';
@@ -261,6 +262,24 @@ export function saveOrder() {
   }
 }
 
+// Удаление строки — как в окне проверки Excel: крестик слева, подтверждение, потом тост «Вернуть».
+async function removeLineWithConfirm(line) {
+  const buttons = () => [...$('#order-lines').querySelectorAll('.line-remove')];
+  const index = buttons().findIndex(button => button.dataset.key === line.key);
+  const confirmed = await confirmAction({
+    title: 'Удалить позицию?',
+    message: `Артикул ${line.sku} — ${line.name}. Позиция пропадёт из заявки.`,
+    confirmLabel: 'Удалить'
+  });
+  if (!confirmed) {
+    buttons()[index]?.focus();
+    return;
+  }
+  removeLines([line], `Артикул ${line.sku} удалён из заявки.`);
+  // Фокус — на крестик строки, вставшей на место удалённой, иначе на кнопку очистки заявки.
+  (buttons()[index] ?? buttons().at(-1) ?? $('#clear-order'))?.focus();
+}
+
 // Удаление обратимо: тост предлагает вернуть позиции на прежние места.
 export function removeLines(lines, message) {
   const removed = state.order.map((line, index) => ({ line, index })).filter(({ line }) => lines.includes(line));
@@ -288,7 +307,7 @@ export function renderOrder() {
   const shown = visibleOrder();
   state.orderPage = Math.min(Math.max(1, state.orderPage), orderPageCount(shown.length));
   const visible = state.orderPageSize ? shown.slice((state.orderPage - 1) * state.orderPageSize, state.orderPage * state.orderPageSize) : shown;
-  // Строка таблицы: компания и код, наименование, тираж (можно изменить), срок, цена за штуку, сумма, удалить.
+  // Строка таблицы: удалить, компания и код, наименование, тираж (можно изменить), срок, цена за штуку, сумма.
   visible.forEach(line => {
     const row = document.createElement('tr');
     const code = cell('td', line.sku, 'code');
@@ -333,13 +352,14 @@ export function renderOrder() {
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'line-remove';
-    remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16m-10 4v6m4-6v6M9 7l1-3h4l1 3m-9 0 1 14h10l1-14"/></svg>';
+    remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+    remove.dataset.key = line.key;
     remove.title = 'Удалить позицию';
     remove.ariaLabel = `Удалить артикул ${line.sku}`;
-    remove.addEventListener('click', () => removeLines([line], `Артикул ${line.sku} удалён из заявки.`));
+    remove.addEventListener('click', () => removeLineWithConfirm(line));
     removeCell.append(remove);
 
-    row.append(code, cell('td', line.name, 'name'), quantity, urgency, price, total, removeCell);
+    row.append(removeCell, code, cell('td', line.name, 'name'), quantity, urgency, price, total);
     if (line.id === state.flashLineId) row.className = 'line-flash';
     root.append(row);
   });
