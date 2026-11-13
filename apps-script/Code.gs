@@ -3,6 +3,7 @@
  * POST {action: 'catalog', password} — читает таблицу и отдаёт каталог (API_CONTRACT.md).
  * POST {action: 'order', password, …} — записывает заявку на лист «Заявки» и пересылает её менеджеру в Telegram.
  * POST {action: 'orders', password} — список заявок с листа «Заявки» со статусами.
+ * POST {action: 'orderLines', password, number} — позиции одной заявки с листа «Позиции заявок».
  * Без верного пароля не отдаёт ничего. Другие листы не изменяет. Расчёт — в js/pricing.js.
  *
  * Скрипт создаётся из самой таблицы («Расширения» → «Apps Script») и работает только с ней:
@@ -17,6 +18,8 @@ const ORDER_LIMIT = { count: 20, seconds: 600 };
 const MAX_LINES = 300; // клиенты загружают свои таблицы: в заказе бывает 60 позиций и больше
 const TELEGRAM_TEXT_LIMIT = 4000; // Telegram принимает до 4096 символов в сообщении
 const ORDERS_SHEET = 'Заявки';
+const LINES_SHEET = 'Позиции заявок';
+const LINES_HEADER = ['Номер заявки', 'Компания', 'Артикул', 'Название', 'Тираж', 'Срок', 'Цена за шт.', 'Сумма', 'Примечание'];
 const SHIPPED = 'Отгружено';
 const TIME_ZONE = 'Europe/Moscow';
 const URGENCIES = ['Стандартный', 'Срочный', 'Экстренный'];
@@ -108,6 +111,14 @@ function doPost(e) {
       return json({ error: { code: 'ORDERS_READ_FAILED', message: `Не удалось прочитать заявки: ${error.message}` } });
     }
   }
+  if (order.action === 'orderLines') {
+    try {
+      return json({ lines: readOrderLines(field(order.number, 40)) });
+    } catch (error) {
+      console.error(error);
+      return json({ error: { code: 'ORDER_LINES_READ_FAILED', message: `Не удалось прочитать позиции заявки: ${error.message}` } });
+    }
+  }
   try {
     if (order.action !== 'order') {
       return json({ error: { code: 'UNKNOWN_ACTION', message: 'Неизвестное действие' } });
@@ -124,10 +135,18 @@ function doPost(e) {
     // Номер выдаёт скрипт по листу «Заявки» и сразу занимает его строкой — так номера не повторяются.
     // Не записалось на лист — заявка не уходит: клиент увидит ошибку и сможет отправить снова.
     order.number = reserveOrderRow(order);
+    // Позиции — для подробностей заявки на сайте. Не записались — заявка всё равно уходит менеджеру:
+    // все позиции есть в сообщении и в Excel.
+    try {
+      writeOrderLines(order);
+    } catch (error) {
+      console.error(`Позиции заявки ${order.number} не записаны: ${error.message}`);
+    }
     try {
       sendTelegram(orderMessage(order, check), orderFile(order));
     } catch (error) {
-      // Менеджер заявку не получил — убираем её строку, на листе остаются только доставленные заявки.
+      // Менеджер заявку не получил — убираем её строки, на листах остаются только доставленные заявки.
+      removeOrderLines(order.number);
       removeOrderRow(order.number);
       throw error;
     }
@@ -385,7 +404,7 @@ function findChatId() {
 }
 
 // Лист «Заявки»: одна строка — одна заявка. Колонки A–D: номер, дата и время, компания, итого;
-// E — статус, его ставит менеджер. Строка 1 — заголовки. Позиции заявки — в Telegram и в Excel.
+// E — статус, его ставит менеджер. Строка 1 — заголовки. Позиции заявки — на листе «Позиции заявок».
 // Номер — самый большой номер на листе плюс один, с датой: «FB-0002 от 09.11.2026».
 // Если удалить последнюю строку, её номер выдастся снова; удаление строк из середины номера не меняет.
 // Блокировка не даёт двум одновременным заявкам получить один номер и одну строку.
@@ -427,6 +446,84 @@ function removeOrderRow(number) {
   } catch (error) {
     console.error(`Строка заявки ${number} не удалена: ${error.message}`);
   }
+}
+
+// Лист «Позиции заявок»: одна строка — одна позиция, первая колонка — номер заявки с листа «Заявки».
+// Позиции одной заявки пишутся одним блоком. Лист создаётся сам при первой заявке.
+function writeOrderLines(order) {
+  const values = order.lines.map(line => [
+    order.number,
+    cellText(field(line.company, 100)),
+    cellText(field(line.sku, 40)),
+    cellText(field(line.name, 300)),
+    Number(line.quantity),
+    field(line.urgency, 20),
+    Number(line.unitPrice),
+    Number(line.total),
+    cellText(field(line.condition, 100))
+  ]);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const sheet = linesSheet();
+    sheet.getRange(sheet.getLastRow() + 1, 1, values.length, LINES_HEADER.length).setValues(values);
+    SpreadsheetApp.flush();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function removeOrderLines(number) {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(LINES_SHEET);
+    if (!sheet) return;
+    const lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+    try {
+      const last = sheet.getLastRow();
+      const numbers = last > 1 ? sheet.getRange(2, 1, last - 1, 1).getValues() : [];
+      for (let index = numbers.length - 1; index >= 0; index--) {
+        if (text(numbers[index][0]) === number) sheet.deleteRow(index + 2);
+      }
+    } finally {
+      lock.releaseLock();
+    }
+  } catch (error) {
+    console.error(`Позиции заявки ${number} не удалены: ${error.message}`);
+  }
+}
+
+function linesSheet() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = spreadsheet.getSheetByName(LINES_SHEET);
+  if (sheet) return sheet;
+  sheet = spreadsheet.insertSheet(LINES_SHEET);
+  sheet.getRange(1, 1, 1, LINES_HEADER.length).setValues([LINES_HEADER]).setFontWeight('bold');
+  sheet.setFrozenRows(1);
+  sheet.getRange('C2:C').setNumberFormat('@');
+  sheet.getRange('G2:H').setNumberFormat('#,##0.00 ₽');
+  sheet.setColumnWidth(1, 170);
+  sheet.setColumnWidth(4, 480);
+  return sheet;
+}
+
+// Позиции одной заявки в том порядке, в каком их отправил клиент. Нет листа — позиций нет.
+function readOrderLines(number) {
+  if (!/^FB-\d+/.test(number)) return [];
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(LINES_SHEET);
+  if (!sheet) return [];
+  return sheet.getDataRange().getValues().slice(1)
+    .filter(row => text(row[0]) === number)
+    .map(row => ({
+      company: text(row[1]),
+      sku: text(row[2]),
+      name: text(row[3]),
+      quantity: toNumber(row[4]) || 0,
+      urgency: text(row[5]),
+      unitPrice: toNumber(row[6]) || 0,
+      total: toNumber(row[7]) || 0,
+      condition: text(row[8])
+    }));
 }
 
 function ordersSheet() {

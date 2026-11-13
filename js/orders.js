@@ -1,12 +1,13 @@
 // Вкладка «Заявки»: список из таблицы, статусы, переключение вкладок.
 import { state } from './state.js';
-import { $, cell, money } from './format.js';
+import { $, cell, integer, money } from './format.js';
 import { accessPassword } from './auth.js';
 import { apiUrl } from './load.js';
 import { renderDock } from './order.js';
 
 // Вкладка «Заявки»: все заявки с листа «Заявки» в таблице, новые сверху.
-// Пароль один на всех, поэтому список общий для всех клиентов. Позиции заявки — в Telegram и Excel.
+// Пароль один на всех, поэтому список общий для всех клиентов.
+// Позиции заявки загружаются, когда её раскрывают (лист «Позиции заявок»).
 export const statusLabels = { work: 'В работе', shipped: 'Отгружено' };
 export const dateTime = new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
@@ -25,15 +26,35 @@ export function renderOrders(list = state.ordersList) {
     button.setAttribute('aria-pressed', String(button.dataset.filter === state.ordersFilter));
   });
   const shown = list.filter(entry => state.ordersFilter === 'all' || orderStatus(entry) === state.ordersFilter);
-  shown.forEach(entry => {
+  shown.forEach((entry, index) => {
     const item = document.createElement('li');
     const sentAt = new Date(entry.sentAt);
-    item.append(
+    const head = document.createElement('button');
+    head.type = 'button';
+    head.className = 'sent-order-head';
+    head.setAttribute('aria-expanded', String(openOrders.has(entry.number)));
+    head.setAttribute('aria-controls', `sent-order-lines-${index}`);
+    head.append(
       cell('strong', entry.number),
       cell('span', [Number.isNaN(sentAt.getTime()) ? '' : dateTime.format(sentAt), entry.company].filter(Boolean).join(' · ')),
       cell('em', statusLabels[orderStatus(entry)], orderStatus(entry)),
       cell('b', money.format(entry.total))
     );
+    head.insertAdjacentHTML('beforeend', '<svg class="sent-order-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>');
+    const details = document.createElement('div');
+    details.className = 'sent-order-lines';
+    details.id = `sent-order-lines-${index}`;
+    details.hidden = !openOrders.has(entry.number);
+    head.addEventListener('click', () => {
+      const open = !openOrders.has(entry.number);
+      if (open) openOrders.add(entry.number);
+      else openOrders.delete(entry.number);
+      head.setAttribute('aria-expanded', String(open));
+      details.hidden = !open;
+      if (open) showOrderLines(entry, details);
+    });
+    if (!details.hidden) showOrderLines(entry, details);
+    item.append(head, details);
     root.append(item);
   });
   $('#orders-empty').hidden = !state.ordersLoaded || list.length > 0;
@@ -44,6 +65,92 @@ export function renderOrders(list = state.ordersList) {
   $('#orders-none').textContent = state.ordersFilter === 'shipped' ? 'Отгруженных заявок пока нет.' : 'Все заявки отгружены.';
   $('#orders-count').textContent = list.length;
   $('#orders-count').hidden = !list.length;
+}
+
+// Раскрытые заявки и загруженные позиции переживают обновление списка.
+// Позиции отправленной заявки не меняются, поэтому загружаются один раз.
+const openOrders = new Set();
+const linesCache = new Map();
+
+async function fetchOrderLines(number) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Number(window.FBPRINT_CONFIG?.requestTimeoutMs) || 10000);
+  try {
+    const response = await fetch(apiUrl(), {
+      method: 'POST',
+      body: JSON.stringify({ action: 'orderLines', password: accessPassword(), number }),
+      redirect: 'follow',
+      cache: 'no-store',
+      signal: controller.signal
+    });
+    const payload = await response.json();
+    if (!Array.isArray(payload?.lines)) throw new Error(payload?.error?.message ?? 'нет ответа');
+    return payload.lines;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function showOrderLines(entry, root) {
+  if (linesCache.has(entry.number)) {
+    renderOrderLines(linesCache.get(entry.number), root);
+    return;
+  }
+  root.replaceChildren(cell('p', 'Загружаем позиции…', 'note'));
+  try {
+    const lines = await fetchOrderLines(entry.number);
+    linesCache.set(entry.number, lines);
+    renderOrderLines(lines, root);
+  } catch (error) {
+    console.warn(`Позиции заявки ${entry.number} не загружены:`, error);
+    const retry = cell('button', 'Повторить');
+    retry.type = 'button';
+    retry.className = 'text-button';
+    retry.addEventListener('click', () => showOrderLines(entry, root));
+    const message = cell('p', 'Не удалось загрузить позиции. ', 'note');
+    message.append(retry);
+    root.replaceChildren(message);
+  }
+}
+
+// Позиции в том порядке, в каком их отправили. В заявке на две компании — подзаголовок у каждой.
+function renderOrderLines(lines, root) {
+  if (!lines.length) {
+    root.replaceChildren(cell('p', 'Позиций нет: заявку отправили до того, как сайт начал их сохранять. Состав заявки есть у менеджера в Excel.', 'note'));
+    return;
+  }
+  const table = document.createElement('table');
+  table.className = 'order-table order-lines-table';
+  table.innerHTML = '<thead><tr><th>Артикул</th><th>Название</th><th class="num">Тираж</th><th>Срок</th><th class="num">Цена за шт.</th><th class="num">Сумма</th></tr></thead>';
+  const body = document.createElement('tbody');
+  const companies = [...new Set(lines.map(line => line.company))];
+  companies.forEach(company => {
+    if (companies.length > 1) {
+      const group = document.createElement('tr');
+      group.className = 'order-lines-group';
+      const title = cell('th', company);
+      title.colSpan = 6;
+      title.scope = 'colgroup';
+      group.append(title);
+      body.append(group);
+    }
+    lines.filter(line => line.company === company).forEach(line => {
+      const row = document.createElement('tr');
+      const name = cell('td', line.name, 'name');
+      if (line.condition) name.append(cell('small', line.condition));
+      const quantity = cell('td', `${integer.format(line.quantity)} шт.`, 'quantity');
+      const price = cell('td', money.format(line.unitPrice), 'price');
+      const total = cell('td', money.format(line.total), 'total');
+      [quantity, price, total].forEach(node => { node.className = 'num'; });
+      row.append(cell('td', line.sku, 'code'), name, quantity, cell('td', line.urgency, 'urgency'), price, total);
+      body.append(row);
+    });
+  });
+  table.append(body);
+  const wrap = document.createElement('div');
+  wrap.className = 'order-table-wrap';
+  wrap.append(table);
+  root.replaceChildren(wrap);
 }
 
 // Список и статусы загружаются при входе, при открытии вкладки и после отправки заявки.
