@@ -93,14 +93,18 @@ async function fetchOrderLines(number) {
 
 async function showOrderLines(entry, root) {
   if (linesCache.has(entry.number)) {
-    renderOrderLines(linesCache.get(entry.number), root);
+    renderOrderLines(linesCache.get(entry.number), root, entry.number);
     return;
   }
-  root.replaceChildren(cell('p', 'Загружаем позиции…', 'note'));
+  const loading = document.createElement('div');
+  loading.className = 'order-lines-loading';
+  loading.setAttribute('role', 'status');
+  loading.innerHTML = '<span class="lines-spinner" aria-hidden="true"></span><span class="visually-hidden">Загружаем позиции</span>';
+  root.replaceChildren(loading);
   try {
     const lines = await fetchOrderLines(entry.number);
     linesCache.set(entry.number, lines);
-    renderOrderLines(lines, root);
+    renderOrderLines(lines, root, entry.number);
   } catch (error) {
     console.warn(`Позиции заявки ${entry.number} не загружены:`, error);
     const retry = cell('button', 'Повторить');
@@ -113,44 +117,62 @@ async function showOrderLines(entry, root) {
   }
 }
 
-// Позиции в том порядке, в каком их отправили. В заявке на две компании — подзаголовок у каждой.
-function renderOrderLines(lines, root) {
+// Позиции в том порядке, в каком их отправили. В заявке на несколько компаний — вкладка на каждую,
+// чтобы длинная заявка не превращалась в одну бесконечную таблицу.
+const companyTab = new Map();
+
+function renderOrderLines(lines, root, number) {
   if (!lines.length) {
     root.replaceChildren(cell('p', 'Позиций нет: заявку отправили до того, как сайт начал их сохранять. Состав заявки есть у менеджера в Excel.', 'note'));
     return;
   }
+  const companies = [...new Set(lines.map(line => line.company))];
+  if (companies.length < 2) {
+    root.replaceChildren(linesTable(lines));
+    return;
+  }
+  if (!companies.includes(companyTab.get(number))) companyTab.set(number, companies[0]);
+  const tabs = document.createElement('div');
+  tabs.className = 'order-lines-tabs';
+  tabs.setAttribute('role', 'group');
+  tabs.setAttribute('aria-label', 'Компания');
+  companies.forEach(company => {
+    const own = lines.filter(line => line.company === company);
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.setAttribute('aria-pressed', String(company === companyTab.get(number)));
+    tab.append(company, cell('span', own.length));
+    tab.addEventListener('click', () => {
+      companyTab.set(number, company);
+      renderOrderLines(lines, root, number);
+      root.querySelector('.order-lines-tabs [aria-pressed=true]')?.focus();
+    });
+    tabs.append(tab);
+  });
+  root.replaceChildren(tabs, linesTable(lines.filter(line => line.company === companyTab.get(number))));
+}
+
+function linesTable(lines) {
   const table = document.createElement('table');
   table.className = 'order-table order-lines-table';
   table.innerHTML = '<thead><tr><th>Артикул</th><th>Название</th><th class="num">Тираж</th><th>Срок</th><th class="num">Цена за шт.</th><th class="num">Сумма</th></tr></thead>';
   const body = document.createElement('tbody');
-  const companies = [...new Set(lines.map(line => line.company))];
-  companies.forEach(company => {
-    if (companies.length > 1) {
-      const group = document.createElement('tr');
-      group.className = 'order-lines-group';
-      const title = cell('th', company);
-      title.colSpan = 6;
-      title.scope = 'colgroup';
-      group.append(title);
-      body.append(group);
-    }
-    lines.filter(line => line.company === company).forEach(line => {
-      const row = document.createElement('tr');
-      const name = cell('td', line.name, 'name');
-      if (line.condition) name.append(cell('small', line.condition));
-      const quantity = cell('td', `${integer.format(line.quantity)} шт.`, 'quantity');
-      const price = cell('td', money.format(line.unitPrice), 'price');
-      const total = cell('td', money.format(line.total), 'total');
-      [quantity, price, total].forEach(node => { node.className = 'num'; });
-      row.append(cell('td', line.sku, 'code'), name, quantity, cell('td', line.urgency, 'urgency'), price, total);
-      body.append(row);
-    });
+  lines.forEach(line => {
+    const row = document.createElement('tr');
+    const name = cell('td', line.name, 'name');
+    if (line.condition) name.append(cell('small', line.condition));
+    const quantity = cell('td', `${integer.format(line.quantity)} шт.`, 'quantity');
+    const price = cell('td', money.format(line.unitPrice), 'price');
+    const total = cell('td', money.format(line.total), 'total');
+    [quantity, price, total].forEach(node => { node.className = 'num'; });
+    row.append(cell('td', line.sku, 'code'), name, quantity, cell('td', line.urgency, 'urgency'), price, total);
+    body.append(row);
   });
   table.append(body);
   const wrap = document.createElement('div');
   wrap.className = 'order-table-wrap';
   wrap.append(table);
-  root.replaceChildren(wrap);
+  return wrap;
 }
 
 // Список и статусы загружаются при входе, при открытии вкладки и после отправки заявки.
