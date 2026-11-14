@@ -228,6 +228,6 @@ export function showView() {
     if (tab.dataset.view === view) tab.setAttribute('aria-current', 'page');
     else tab.removeAttribute('aria-current');
   });
-  document.title = view === 'orders' ? 'FB Print — Заявки' : 'FB Print — Расчёт стоимости';
+  document.title = view === 'orders' ? 'FB-print — Заявки' : 'FB-print — Расчёт стоимости';
   renderDock();
 }
