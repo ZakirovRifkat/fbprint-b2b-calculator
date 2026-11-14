@@ -105,7 +105,7 @@ export async function loadData() {
       catalog = normalizeCatalog(payload);
     } catch (error) {
       // Ошибку в таблице исправляет менеджер: место ошибки названо словами листа.
-      error.reason = `В таблице каталога ошибка (${error.message}). Сообщите об этом менеджеру FB Print`;
+      error.reason = `В таблице каталога ошибка (${error.message}). Сообщите об этом менеджеру FB-print`;
       throw error;
     }
     applyCatalog(catalog);
@@ -120,7 +120,7 @@ export async function loadData() {
     closeLogin();
     console.warn('Каталог не загружен:', error);
     const reason = failureReason(error);
-    const advice = error.reason ? '' : ' Нажмите «Обновить» через минуту. Если не поможет, напишите менеджеру FB Print.';
+    const advice = error.reason ? '' : ' Нажмите «Обновить» через минуту. Если не поможет, напишите менеджеру FB-print.';
     if (state.loadedAt) {
       setDataStatus('error', `Не обновлено · данные от ${state.loadedAt}`);
       showCatalogError('Каталог не обновился', `${reason}. Расчёт идёт по данным, загруженным в ${state.loadedAt}.${advice}`);

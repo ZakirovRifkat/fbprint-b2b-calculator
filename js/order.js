@@ -20,7 +20,7 @@ export function repriceOrder() {
     const item = state.data.articles.find(entry => lineKey(entry) === line.key);
     const category = item && categories().get(item.categoryId);
     if (!category) {
-      line.problem = { label: 'Нет в каталоге', hint: 'Удалите позицию или спросите менеджера FB Print.' };
+      line.problem = { label: 'Нет в каталоге', hint: 'Удалите позицию или спросите менеджера FB-print.' };
       return;
     }
     const result = quote(line.quantity, category, line.quantity < category.minimumQuantity ? 'standard' : line.urgency);
