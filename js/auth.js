@@ -39,6 +39,8 @@ export function rememberPassword(value, persist) {
 
 export function forgetPassword() {
   state.sessionPassword = '';
+  state.role = 'client';
+  state.ordersAlert = '';
   writeStorage(localStorage, '');
   writeStorage(sessionStorage, '');
 }

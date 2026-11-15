@@ -1,9 +1,12 @@
 // Вкладка «Заявки»: список из таблицы, статусы, переключение вкладок.
 import { state } from './state.js';
 import { $, cell, integer, money } from './format.js';
-import { accessPassword } from './auth.js';
-import { apiUrl } from './load.js';
+import { accessErrors, accessPassword } from './auth.js';
+import { apiUrl, loadData } from './load.js';
 import { renderDock } from './order.js';
+import { toast } from './toast.js';
+import { confirmAction } from './confirm.js';
+import { LAYOUTS_REFRESH_MS, adminBar, adminErrorText, deleteOrderButton, deleteOrderRequest, deleteOutcome, isAdmin, needsLayoutsRefresh, rebuildLayoutsRequest, roleOf } from './admin.js';
 
 // Вкладка «Заявки»: все заявки с листа «Заявки» в таблице, новые сверху.
 // Пароль один на всех, поэтому список общий для всех клиентов.
@@ -18,7 +21,14 @@ export function orderStatus(entry) {
 
 export function renderOrders(list = state.ordersList) {
   const root = $('#sent-orders-list');
+  const admin = isAdmin();
+  // У администратора список перерисовывается сам, пока собираются папки.
+  // Фокус возвращаем на ту же кнопку той же заявки, чтобы он не улетал в начало страницы.
+  const focused = root.contains(document.activeElement) ? document.activeElement : null;
+  const focusKey = focused?.dataset.focusKey ?? '';
+  const focusNumber = focused?.closest('li')?.dataset.number ?? '';
   root.innerHTML = '';
+  renderAdminChrome();
   const counts = { all: list.length, work: 0, shipped: 0 };
   list.forEach(entry => { counts[orderStatus(entry)] += 1; });
   Object.entries(counts).forEach(([filter, count]) => { $(`#filter-${filter}`).textContent = count; });
@@ -54,9 +64,31 @@ export function renderOrders(list = state.ordersList) {
       if (open) showOrderLines(entry, details);
     });
     if (!details.hidden) showOrderLines(entry, details);
-    item.append(head, details);
+    if (admin) {
+      // Корзина — в строке заголовка, рядом с суммой: удаляется заявка целиком, раскрывать её не нужно.
+      // Отдельной кнопкой рядом: внутри кнопки заголовка другую кнопку разместить нельзя.
+      const top = document.createElement('div');
+      top.className = 'sent-order-top';
+      top.append(head, deleteOrderButton(entry, { onDelete: deleteOrderWithConfirm, busy: busyOrders.get(entry.number) ?? '' }));
+      item.append(top);
+    } else {
+      item.append(head);
+    }
+    // Полоса администратора — отдельно от кнопки заголовка: в кнопке не может быть ссылок и кнопок.
+    if (admin) {
+      item.dataset.number = entry.number;
+      head.dataset.focusKey = 'head';
+      const bar = adminBar(entry, { onRebuild: rebuildLayouts, busy: busyOrders.get(entry.number) ?? '' });
+      if (bar) item.append(bar);
+    }
+    item.append(details);
     root.append(item);
   });
+  if (focusKey && focusNumber) {
+    const item = [...root.children].find(child => child.dataset.number === focusNumber);
+    // Выключенная кнопка («Удаляем…») фокус не принимает — тогда он на заголовке заявки.
+    (item?.querySelector(`[data-focus-key="${focusKey}"]:not(:disabled)`) ?? item?.querySelector('.sent-order-head'))?.focus({ preventScroll: true });
+  }
   $('#orders-empty').hidden = !state.ordersLoaded || list.length > 0;
   $('#orders-toolbar').hidden = false;
   $('.orders-filter').hidden = !list.length;
@@ -65,6 +97,107 @@ export function renderOrders(list = state.ordersList) {
   $('#orders-none').textContent = state.ordersFilter === 'shipped' ? 'Отгруженных заявок пока нет.' : 'Все заявки отгружены.';
   $('#orders-count').textContent = list.length;
   $('#orders-count').hidden = !list.length;
+}
+
+// Метка в шапке и предупреждение о Диске видны только администратору.
+function renderAdminChrome() {
+  const admin = isAdmin();
+  $('#admin-badge').hidden = !admin;
+  $('#orders-admin-alert').textContent = admin ? state.ordersAlert : '';
+  $('#orders-admin-alert').hidden = !admin || !state.ordersAlert;
+}
+
+// Заявки, которые сейчас удаляются или пересобираются: их кнопки остаются выключенными,
+// даже если список успеет перерисоваться.
+const busyOrders = new Map();
+
+function forgetOrder(number) {
+  state.ordersList = state.ordersList.filter(entry => entry.number !== number);
+  openOrders.delete(number);
+  linesCache.delete(number);
+  companyTab.delete(number);
+}
+
+// Фокус — на кнопку заявки после перерисовки; кнопки нет (роль сменилась) — на заголовок заявки или списка.
+function focusOrderControl(number, key) {
+  const item = [...$('#sent-orders-list').children].find(child => child.dataset.number === number);
+  (item?.querySelector(`[data-focus-key="${key}"]`) ?? item?.querySelector('.sent-order-head') ?? $('#orders-title')).focus();
+}
+
+function adminActionFailed(error, prefix) {
+  // Пароль сменили, пока страница была открыта: загрузка каталога заново покажет окно входа.
+  if (accessErrors.includes(error.code)) {
+    loadData();
+    return;
+  }
+  toast(adminErrorText(error, prefix), { persist: true });
+}
+
+// Удаление: заявка и её позиции исчезают с обоих листов таблицы. Папка на Яндекс Диске остаётся.
+async function deleteOrderWithConfirm(entry) {
+  const confirmed = await confirmAction({
+    title: `Удалить заявку ${entry.number}?`,
+    message: 'Заявка и её позиции исчезнут из таблицы. Папка макетов на Яндекс Диске останется. Удаление не отменить.',
+    confirmLabel: 'Удалить'
+  });
+  if (!confirmed) return;
+  busyOrders.set(entry.number, 'delete');
+  renderOrders();
+  let failure = null;
+  try {
+    await deleteOrderRequest(entry.number);
+  } catch (error) {
+    failure = error;
+  } finally {
+    busyOrders.delete(entry.number);
+  }
+  if (deleteOutcome(failure?.code) !== 'removed') {
+    renderOrders();
+    focusOrderControl(entry.number, 'delete');
+    adminActionFailed(failure, 'Заявка не удалена');
+    return;
+  }
+  // Фокус — на следующую заявку списка (или предыдущую, если удалили последнюю).
+  const items = [...$('#sent-orders-list').children];
+  const index = items.findIndex(child => child.dataset.number === entry.number);
+  forgetOrder(entry.number);
+  renderOrders();
+  toast(`Заявка ${entry.number} удалена.`);
+  const heads = $('#sent-orders-list').querySelectorAll('.sent-order-head');
+  const next = heads[Math.min(Math.max(index, 0), heads.length - 1)];
+  (next ?? $('#orders-title')).focus();
+}
+
+// «Пересобрать папку»: заявка снова встаёт в очередь, файлы копируются в ту же папку.
+async function rebuildLayouts(entry) {
+  busyOrders.set(entry.number, 'rebuild');
+  renderOrders();
+  try {
+    const payload = await rebuildLayoutsRequest(entry.number);
+    busyOrders.delete(entry.number);
+    const current = state.ordersList.find(item => item.number === entry.number);
+    if (current && payload.layouts) current.layouts = payload.layouts;
+    renderOrders();
+    toast(`Макеты заявки ${entry.number} собираются заново.`);
+    scheduleLayoutsRefresh();
+  } catch (error) {
+    busyOrders.delete(entry.number);
+    renderOrders();
+    focusOrderControl(entry.number, 'rebuild');
+    adminActionFailed(error, 'Сборка не запущена');
+    if (error.code === 'ORDER_NOT_FOUND') loadOrders();
+  }
+}
+
+// Пока папки собираются, администратор видит новое состояние без «Обновить».
+function scheduleLayoutsRefresh() {
+  clearTimeout(state.layoutsTimer);
+  state.layoutsTimer = null;
+  if (!needsLayoutsRefresh(state.role, state.ordersList, location.hash)) return;
+  state.layoutsTimer = setTimeout(() => {
+    state.layoutsTimer = null;
+    if (location.hash === '#orders') loadOrders({ quiet: true });
+  }, LAYOUTS_REFRESH_MS);
 }
 
 // Раскрытые заявки и загруженные позиции переживают обновление списка.
@@ -177,8 +310,11 @@ function linesTable(lines) {
 
 // Список и статусы загружаются при входе, при открытии вкладки и после отправки заявки.
 // Если таблица не ответила, остаётся последний загруженный список с пометкой.
-export async function loadOrders() {
+// quiet — фоновое обновление у администратора: без «Обновляем заявки…» в строке состояния.
+export async function loadOrders({ quiet = false } = {}) {
   if (!apiUrl()) {
+    state.role = 'client';
+    state.ordersAlert = '';
     state.ordersLoaded = true;
     renderOrders();
     $('#orders-sync').textContent = 'Демо-режим: заявки появятся после подключения таблицы.';
@@ -190,7 +326,7 @@ export async function loadOrders() {
   const controller = new AbortController();
   state.ordersController = controller;
   const timeout = setTimeout(() => controller.abort(), Number(window.FBPRINT_CONFIG?.requestTimeoutMs) || 10000);
-  $('#orders-sync').textContent = 'Обновляем заявки…';
+  if (!quiet) $('#orders-sync').textContent = 'Обновляем заявки…';
   try {
     const response = await fetch(apiUrl(), {
       method: 'POST',
@@ -201,10 +337,13 @@ export async function loadOrders() {
     });
     const payload = await response.json();
     if (!Array.isArray(payload?.orders)) throw new Error(payload?.error?.message ?? 'нет ответа');
+    state.role = roleOf(payload);
+    state.ordersAlert = state.role === 'admin' ? String(payload.layoutsAlert ?? '') : '';
     state.ordersList = payload.orders;
     state.ordersLoaded = true;
     renderOrders();
     $('#orders-sync').textContent = `Обновлено в ${new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
+    scheduleLayoutsRefresh();
   } catch (error) {
     if (controller !== state.ordersController) return;
     state.ordersLoaded = true;
@@ -213,6 +352,8 @@ export async function loadOrders() {
       ? 'Не удалось обновить заявки — показан последний загруженный список.'
       : 'Не удалось загрузить заявки. Нажмите «Обновить».';
     console.warn('Заявки не загружены:', error);
+    // Связь пропала во время сборки — пробуем снова через 20 секунд.
+    scheduleLayoutsRefresh();
   } finally {
     clearTimeout(timeout);
   }

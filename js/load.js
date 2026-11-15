@@ -5,7 +5,8 @@ import { demoCatalog, emptyCatalog, normalizeCatalog } from './catalog.js';
 import { accessErrors, accessPassword, askPassword, closeLogin, forgetPassword, showPageLoader } from './auth.js';
 import { renderCompanies, renderSearch, renderSelected } from './calculator.js';
 import { renderOrder, repriceOrder } from './order.js';
-import { loadOrders } from './orders.js';
+import { loadOrders, renderOrders } from './orders.js';
+import { roleOf } from './admin.js';
 
 export function apiUrl() {
   return String(window.FBPRINT_CONFIG?.apiUrl ?? '').trim();
@@ -55,6 +56,7 @@ export function failureReason(error) {
 export async function loadData() {
   const url = apiUrl();
   if (!url) {
+    state.role = 'client';
     showPageLoader(false);
     applyCatalog(normalizeCatalog(demoCatalog));
     setDataStatus('demo', 'Демо-режим');
@@ -93,6 +95,7 @@ export async function loadData() {
     if (accessErrors.includes(payload?.error?.code)) {
       forgetPassword();
       applyCatalog(emptyCatalog);
+      renderOrders();
       askPassword(payload.error.code === 'ACCESS_DENIED' && !typedPassword
         ? 'Сохранённый пароль больше не подходит — введите новый.'
         : payload.error.message);
@@ -100,6 +103,8 @@ export async function loadData() {
     }
 
     closeLogin();
+    // Роль решает пароль: админский пароль открывает удаление заявок и папки макетов.
+    state.role = roleOf(payload);
     let catalog;
     try {
       catalog = normalizeCatalog(payload);
@@ -112,6 +117,7 @@ export async function loadData() {
     state.loadedAt = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
     setDataStatus('live', `Обновлено в ${state.loadedAt}`);
     showCatalogError('');
+    renderOrders();
     loadOrders();
   } catch (error) {
     // Запрос отменён более новым нажатием «Обновить» — ошибки нет.

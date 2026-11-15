@@ -19,5 +19,9 @@ export const state = {
   ordersList: [],
   ordersLoaded: false,
   ordersFilter: 'all',
-  ordersController: null
+  ordersController: null,
+  // Роль из последнего ответа catalog/orders. Не хранится: при каждой загрузке приходит заново.
+  role: 'client',
+  ordersAlert: '',
+  layoutsTimer: null
 };
