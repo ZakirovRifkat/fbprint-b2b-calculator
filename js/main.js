@@ -4,7 +4,7 @@ import { $, fitText } from './format.js';
 import { stepQuantity } from './pricing.js';
 import { categories, demoCatalog, emptyCatalog, normalizeCatalog } from './catalog.js';
 import { rememberPassword, setLoginBusy, showPassword } from './auth.js';
-import { apiUrl, applyCatalog, loadData } from './load.js';
+import { apiUrl, applyCatalog, loadData, logout } from './load.js';
 import { addLine, hideSearch, quantity, renderCalculation, renderSearch, renderSelected, setQuantity } from './calculator.js';
 import { clearOrderWithConfirm, orderFilter, readSavedOrder, renderDock, renderOrder, resetOrderFilters } from './order.js';
 import { addImportedLines, evaluateImportRow, fixable, importFile, renderImport, restoreImportRow } from './import.js';
@@ -204,10 +204,8 @@ $('#order-form').addEventListener('submit', event => {
   $('#order-dialog').close();
   toast('Демо-режим: заявка не отправлена менеджеру.');
 });
-$('#refresh-data').addEventListener('click', () => {
-  loadData();
-  loadArticles({ force: true });
-});
+$('#logout').addEventListener('click', logout);
+
 $('#login-form').addEventListener('submit', event => {
   event.preventDefault();
   const value = $('#login-password').value.trim();

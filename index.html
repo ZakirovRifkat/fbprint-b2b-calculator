@@ -16,6 +16,8 @@
     <span class="page-loader-spinner" aria-hidden="true"></span>
     <p>Загружаем каталог…</p>
   </div>
+  <!-- Метка администратора висит в правом верхнем углу экрана и не занимает место в шапке. -->
+  <span class="admin-badge" id="admin-badge" hidden>Администратор</span>
   <header class="site-header">
     <a class="brand" href="#top" aria-label="FB-print, на главную">
       <img src="assets/logo-full.svg" alt="FB-print" width="120" height="95">
@@ -26,10 +28,9 @@
       <a href="#articles" data-view="articles" id="articles-tab" hidden>Артикулы</a>
     </nav>
     <div class="header-meta" data-state="demo" aria-busy="false">
-      <span class="admin-badge" id="admin-badge" hidden>Администратор</span>
       <span class="sync-dot" aria-hidden="true"></span>
       <span id="data-status" aria-live="polite">Демо-данные</span>
-      <button class="text-button" id="refresh-data" type="button">Обновить</button>
+      <button class="text-button" id="logout" type="button" hidden>Выйти</button>
     </div>
   </header>
 
@@ -302,6 +303,29 @@
     <p class="orders-none" id="articles-none" hidden></p>
     <ul class="article-cards" id="article-cards"></ul>
   </main>
+
+  <!-- Просмотр макета крупно. Открывается кликом по превью на вкладке «Артикулы». -->
+  <dialog class="layout-viewer" id="layout-viewer" aria-labelledby="viewer-name">
+    <div class="viewer-top">
+      <p class="viewer-title"><span id="viewer-sku"></span><strong id="viewer-name"></strong></p>
+      <a class="viewer-link" id="viewer-link" href="#" target="_blank" rel="noopener noreferrer">Открыть в Яндекс Диске<span class="visually-hidden"> (откроется в новой вкладке)</span></a>
+      <button class="viewer-close" id="viewer-close" type="button" aria-label="Закрыть просмотр">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="viewer-stage">
+      <button class="viewer-nav viewer-nav--prev" id="viewer-prev" type="button" aria-label="Предыдущий макет">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
+      </button>
+      <img class="viewer-image" id="viewer-image" alt="" hidden>
+      <span class="article-preview-spinner viewer-spinner" id="viewer-spinner" hidden></span>
+      <p class="viewer-note" id="viewer-note" hidden>Превью нет. Откройте макет в Яндекс Диске.</p>
+      <button class="viewer-nav viewer-nav--next" id="viewer-next" type="button" aria-label="Следующий макет">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+      </button>
+    </div>
+    <p class="viewer-count" id="viewer-count" aria-live="polite"></p>
+  </dialog>
 
   <dialog id="login-dialog">
     <form id="login-form">

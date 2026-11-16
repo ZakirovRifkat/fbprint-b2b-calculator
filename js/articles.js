@@ -53,7 +53,7 @@ export function articleCounts(list, company = ALL) {
 }
 
 export const articleLayoutsRequest = () => postAction('articleLayouts', {}, 60000);
-export const layoutPreviewsRequest = paths => postAction('layoutPreviews', { paths }, 60000);
+export const layoutPreviewsRequest = (paths, size) => postAction('layoutPreviews', size ? { paths, size } : { paths }, 60000);
 
 // ───── Загрузка списка ─────
 
@@ -75,8 +75,9 @@ export async function loadArticles({ force = false } = {}) {
     return;
   }
   view.error = '';
-  renderArticles();
+  // Флаг загрузки ставится до отрисовки — иначе первый кадр вкладки пустой, без индикатора.
   view.loading = (async () => {
+    await Promise.resolve();
     try {
       const payload = await articleLayoutsRequest();
       view.list = Array.isArray(payload.articles) ? payload.articles : [];
@@ -94,6 +95,7 @@ export async function loadArticles({ force = false } = {}) {
       renderArticles();
     }
   })();
+  renderArticles();
   return view.loading;
 }
 
@@ -144,9 +146,7 @@ export function renderArticles() {
   error.textContent = view.error;
 
   if (!view.loaded) {
-    const loading = node('li', 'articles-loading');
-    loading.append(node('span', 'lines-spinner'));
-    root.replaceChildren(...(view.loading ? [loading] : []));
+    root.replaceChildren(...(view.loading ? skeletonCards() : []));
     $('#articles-none').hidden = true;
     return;
   }
@@ -164,18 +164,31 @@ export function renderArticles() {
   observePreviews(root);
 }
 
+// Пока список грузится — серые карточки той же сетки: видно, что идёт загрузка и что здесь будет.
+function skeletonCards(count = 8) {
+  return Array.from({ length: count }, () => {
+    const card = node('li', 'article-card article-skeleton');
+    card.setAttribute('aria-hidden', 'true');
+    const preview = node('div', 'article-preview');
+    preview.append(node('span', 'article-preview-spinner'));
+    const body = node('div', 'article-body');
+    body.append(node('span', 'skeleton-line skeleton-line--short'), node('span', 'skeleton-line'), node('span', 'skeleton-line skeleton-line--mid'));
+    card.append(preview, body);
+    return card;
+  });
+}
+
 function articleCard(article) {
   const card = node('li', 'article-card');
   const ok = hasLayout(article);
   card.dataset.state = ok ? 'ok' : 'problem';
 
-  const preview = node(ok ? 'a' : 'div', 'article-preview');
+  const preview = node(ok ? 'button' : 'div', 'article-preview');
   if (ok) {
-    preview.href = article.url;
-    preview.target = '_blank';
-    preview.rel = 'noopener noreferrer';
-    preview.setAttribute('aria-label', `Открыть макет ${article.layout} в Яндекс Диске (откроется в новой вкладке)`);
+    preview.type = 'button';
+    preview.setAttribute('aria-label', `Посмотреть макет ${article.layout}`);
     preview.dataset.path = article.path;
+    preview.addEventListener('click', () => openViewer(article));
     paintPreview(preview);
   } else {
     preview.append(node('span', 'article-preview-note', 'Нет макета'));
@@ -284,9 +297,81 @@ function pump() {
   }
 }
 
+// ───── Просмотр макета крупно ─────
+// Клик по превью открывает окно просмотра: сразу показывается превью карточки, потом подгружается крупное (XL).
+// Стрелки и клавиши ← → листают макеты из текущего списка (с учётом фильтров), Esc и клик мимо картинки закрывают.
+const largePreviews = new Map(); // path → 'data:image/…' | ''
+const viewer = { items: [], index: 0 };
+
+// Макеты, которые листаются в окне просмотра: видимые сейчас карточки с макетом.
+export const viewerItems = (list, filter = view.filter) => filterArticles(list, filter).filter(hasLayout);
+
+export function openViewer(article) {
+  viewer.items = viewerItems(view.list);
+  viewer.index = Math.max(0, viewer.items.indexOf(article));
+  const dialog = $('#layout-viewer');
+  if (!dialog.open) dialog.showModal();
+  showViewerItem();
+}
+
+function stepViewer(delta) {
+  if (viewer.items.length < 2) return;
+  viewer.index = (viewer.index + delta + viewer.items.length) % viewer.items.length;
+  showViewerItem();
+}
+
+function showViewerItem() {
+  const article = viewer.items[viewer.index];
+  if (!article) return;
+  $('#viewer-sku').textContent = `${article.sku} · ${companyName(article.companyId)}`;
+  $('#viewer-name').textContent = article.layout;
+  $('#viewer-link').href = article.url;
+  $('#viewer-count').textContent = viewer.items.length > 1 ? `${viewer.index + 1} из ${viewer.items.length}` : '';
+  $('#viewer-prev').hidden = viewer.items.length < 2;
+  $('#viewer-next').hidden = viewer.items.length < 2;
+  paintViewer(article);
+  if (largePreviews.has(article.path)) return;
+  layoutPreviewsRequest([article.path], 'XL')
+    .then(payload => largePreviews.set(article.path, String(payload.previews?.[article.path] ?? '')))
+    .catch(error => {
+      console.warn('Крупное превью не загружено:', error);
+      largePreviews.set(article.path, '');
+    })
+    .finally(() => {
+      if (viewer.items[viewer.index]?.path === article.path) paintViewer(article);
+    });
+}
+
+function paintViewer(article) {
+  const image = $('#viewer-image');
+  const src = largePreviews.get(article.path) || previews.get(article.path) || '';
+  const waiting = !largePreviews.has(article.path);
+  image.hidden = !src;
+  if (src && image.getAttribute('src') !== src) image.src = src;
+  image.alt = `Макет ${article.layout}`;
+  $('#viewer-spinner').hidden = !waiting || Boolean(src);
+  $('#viewer-note').hidden = Boolean(src) || waiting;
+}
+
+function initViewer() {
+  const dialog = $('#layout-viewer');
+  $('#viewer-close').addEventListener('click', () => dialog.close());
+  $('#viewer-prev').addEventListener('click', () => stepViewer(-1));
+  $('#viewer-next').addEventListener('click', () => stepViewer(1));
+  // Клик по затемнению или пустому месту вокруг картинки закрывает просмотр.
+  dialog.addEventListener('click', event => {
+    if (event.target === dialog || event.target.classList?.contains('viewer-stage')) dialog.close();
+  });
+  dialog.addEventListener('keydown', event => {
+    if (event.key === 'ArrowLeft') stepViewer(-1);
+    if (event.key === 'ArrowRight') stepViewer(1);
+  });
+}
+
 // ───── События ─────
 
 export function initArticles() {
+  initViewer();
   $('#articles-company').addEventListener('click', event => {
     const button = event.target.closest('button[data-company]');
     if (!button) return;
@@ -310,5 +395,7 @@ export function forgetArticles() {
   view.loaded = false;
   view.error = '';
   previews.clear();
+  largePreviews.clear();
   queued.clear();
+  if ($('#layout-viewer')?.open) $('#layout-viewer').close();
 }

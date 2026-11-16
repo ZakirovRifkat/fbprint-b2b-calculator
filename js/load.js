@@ -5,7 +5,8 @@ import { demoCatalog, emptyCatalog, normalizeCatalog } from './catalog.js';
 import { accessErrors, accessPassword, askPassword, closeLogin, forgetPassword, showPageLoader } from './auth.js';
 import { renderCompanies, renderSearch, renderSelected } from './calculator.js';
 import { renderOrder, repriceOrder } from './order.js';
-import { loadOrders, renderOrders } from './orders.js';
+import { loadOrders, renderOrders, showView } from './orders.js';
+import { forgetArticles } from './articles.js';
 import { roleOf } from './admin.js';
 
 export function apiUrl() {
@@ -17,7 +18,27 @@ export function setDataStatus(state, message) {
   meta.dataset.state = state;
   meta.ariaBusy = String(state === 'loading');
   $('#data-status').textContent = message;
-  $('#refresh-data').disabled = state === 'loading';
+  // «Выйти» — только когда вход был: в демо-режиме и в окне входа выходить неоткуда.
+  $('#logout').hidden = state === 'demo' || state === 'locked';
+}
+
+// Выход: пароль стирается из браузера, данные каталога и заявок убираются с экрана, открывается окно входа.
+// Заявка в калькуляторе остаётся: это черновик, а не данные из таблицы.
+export function logout() {
+  state.loadController?.abort();
+  state.ordersController?.abort();
+  clearTimeout(state.layoutsTimer);
+  state.layoutsTimer = null;
+  forgetPassword();
+  forgetArticles();
+  state.loadedAt = null;
+  state.ordersList = [];
+  state.ordersLoaded = false;
+  applyCatalog(emptyCatalog);
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+  renderOrders();
+  showView();
+  askPassword();
 }
 
 export function applyCatalog(nextData) {
@@ -120,13 +141,13 @@ export async function loadData() {
     renderOrders();
     loadOrders();
   } catch (error) {
-    // Запрос отменён более новым нажатием «Обновить» — ошибки нет.
+    // Запрос отменён более новым запросом — ошибки нет.
     if (controller !== state.loadController) return;
     // Пароль принят (или не проверен из-за сети) — ошибку каталога показываем на странице, а не в окне входа.
     closeLogin();
     console.warn('Каталог не загружен:', error);
     const reason = failureReason(error);
-    const advice = error.reason ? '' : ' Нажмите «Обновить» через минуту. Если не поможет, напишите менеджеру FB-print.';
+    const advice = error.reason ? '' : ' Обновите страницу через минуту. Если не поможет, напишите менеджеру FB-print.';
     if (state.loadedAt) {
       setDataStatus('error', `Не обновлено · данные от ${state.loadedAt}`);
       showCatalogError('Каталог не обновился', `${reason}. Расчёт идёт по данным, загруженным в ${state.loadedAt}.${advice}`);

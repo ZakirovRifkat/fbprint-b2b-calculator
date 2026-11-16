@@ -197,7 +197,7 @@ async function rebuildLayouts(entry) {
   }
 }
 
-// Пока папки собираются, администратор видит новое состояние без «Обновить».
+// Пока папки собираются, администратор видит новое состояние без перезагрузки страницы.
 function scheduleLayoutsRefresh() {
   clearTimeout(state.layoutsTimer);
   state.layoutsTimer = null;
@@ -358,7 +358,7 @@ export async function loadOrders({ quiet = false } = {}) {
     renderOrders();
     $('#orders-sync').textContent = state.ordersList.length
       ? 'Не удалось обновить заявки — показан последний загруженный список.'
-      : 'Не удалось загрузить заявки. Нажмите «Обновить».';
+      : 'Не удалось загрузить заявки. Обновите страницу.';
     console.warn('Заявки не загружены:', error);
     // Связь пропала во время сборки — пробуем снова через 20 секунд.
     scheduleLayoutsRefresh();

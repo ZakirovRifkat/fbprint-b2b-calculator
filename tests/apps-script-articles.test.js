@@ -87,6 +87,18 @@ test('layoutPreviews: путь вне папки макетов и несуще�
   assert.deepEqual(h.disk.previewDownloads, []);
 });
 
+test('layoutPreviews: размер XL для просмотра крупно, неизвестный размер — M; кэш у размеров свой', () => {
+  const h = loadCodeGs({ layouts: LAYOUTS });
+  const file = path('ГФ_10165_3_80x120.jpg');
+  assert.equal(h.call({ action: 'layoutPreviews', password: ADMIN, paths: [file] }).size, 'M');
+  const big = h.call({ action: 'layoutPreviews', password: ADMIN, paths: [file], size: 'XL' });
+  assert.equal(big.size, 'XL');
+  assert.ok(big.previews[file].startsWith('data:image/jpeg;base64,'));
+  assert.equal(h.call({ action: 'layoutPreviews', password: ADMIN, paths: [file], size: 'XXXL' }).size, 'M');
+  const sizes = h.disk.requests.filter(r => r.kind === 'previewInfo').map(r => r.query.preview_size);
+  assert.deepEqual(sizes, ['M', 'XL']);
+});
+
 test('layoutPreviews: не больше 12 путей за запрос', () => {
   const names = Array.from({ length: 15 }, (_, i) => `ГФ_${20000 + i}_1.jpg`);
   const h = loadCodeGs({ layouts: names });

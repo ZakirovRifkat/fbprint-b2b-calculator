@@ -1663,6 +1663,7 @@ function rebuildLayouts(number) {
 // а превью скрипт сам скачивает с токеном и отдаёт сайту картинкой.
 
 const LAYOUT_PREVIEW_SIZE = 'M';         // около 300 px по ширине: хватает для карточки
+const LAYOUT_PREVIEW_SIZES = ['M', 'XL']; // XL — около 800 px, для просмотра макета крупно
 const LAYOUT_PREVIEW_BATCH = 12;         // превью за один запрос сайта
 const LAYOUT_PREVIEW_CACHE_S = 21600;    // готовое превью лежит в кэше 6 часов
 const LAYOUT_PREVIEW_CACHE_MAX = 100000; // CacheService хранит до 100 КБ на значение; больше — не кэшируем
@@ -1737,12 +1738,13 @@ function isDiskPreviewUrl(url) {
   return /^https:\/\/([a-z0-9-]+\.)*(yandex\.ru|yandex\.net)\//.test(String(url || ''));
 }
 
-function previewCacheKey(path) {
-  const key = `preview:${LAYOUT_PREVIEW_SIZE}:${diskPathKey(path)}`;
+function previewCacheKey(path, size) {
+  const key = `preview:${size}:${diskPathKey(path)}`;
   return key.length <= 250 ? key : '';
 }
 
 // Ответ на layoutPreviews: { previews: { путь: 'data:image/…;base64,…' } }.
+// size — 'M' (карточка, по умолчанию) или 'XL' (просмотр крупно); другое значение — 'M'.
 // Не больше LAYOUT_PREVIEW_BATCH путей за раз. Путь вне папки макетов или без превью — пустая строка.
 function layoutPreviewsReply(request, role) {
   if (role !== 'admin') return { error: ADMIN_REQUIRED };
@@ -1753,7 +1755,8 @@ function layoutPreviewsReply(request, role) {
     .filter(Boolean)
     .slice(0, LAYOUT_PREVIEW_BATCH);
   try {
-    return { ok: true, previews: layoutPreviews(paths, config.root, config.token) };
+    const size = LAYOUT_PREVIEW_SIZES.includes(request.size) ? request.size : LAYOUT_PREVIEW_SIZE;
+    return { ok: true, size, previews: layoutPreviews(paths, config.root, config.token, size) };
   } catch (error) {
     console.error(error);
     const reason = error.kind === 'auth' ? LAYOUT_ALERT_TEXT : error.message;
@@ -1762,7 +1765,7 @@ function layoutPreviewsReply(request, role) {
 }
 
 // Сначала кэш, потом Диск: один пакет запросов за ссылками на превью, второй — за самими картинками.
-function layoutPreviews(paths, root, token) {
+function layoutPreviews(paths, root, token, size = LAYOUT_PREVIEW_SIZE) {
   const cache = CacheService.getScriptCache();
   const previews = {};
   const wanted = [];
@@ -1770,7 +1773,7 @@ function layoutPreviews(paths, root, token) {
     if (Object.prototype.hasOwnProperty.call(previews, path)) return;
     previews[path] = '';
     if (!insideLayoutsRoot(path, root)) return;
-    const key = previewCacheKey(path);
+    const key = previewCacheKey(path, size);
     const cached = key ? cache.get(key) : null;
     if (cached) previews[path] = cached;
     else wanted.push(path);
@@ -1779,7 +1782,7 @@ function layoutPreviews(paths, root, token) {
 
   const infos = diskFetchAll(wanted.map(path => diskRequestParams('get', '/resources', {
     path,
-    preview_size: LAYOUT_PREVIEW_SIZE,
+    preview_size: size,
     preview_crop: 'false',
     fields: 'preview'
   })));
@@ -1810,7 +1813,7 @@ function layoutPreviews(paths, root, token) {
     const dataUrl = `data:${type};base64,${Utilities.base64Encode(blob.getBytes())}`;
     const path = links[index].path;
     previews[path] = dataUrl;
-    const key = previewCacheKey(path);
+    const key = previewCacheKey(path, size);
     if (key && dataUrl.length <= LAYOUT_PREVIEW_CACHE_MAX) {
       try {
         cache.put(key, dataUrl, LAYOUT_PREVIEW_CACHE_S);
