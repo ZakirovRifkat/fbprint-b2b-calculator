@@ -179,3 +179,75 @@ test('deleteArticle: удаляет строку, только если в не�
   assert.equal(sheetRow(h, GF, 3)[2], '10167');
   assert.ok(!h.sheets[GF].data.some(r => r[2] === '10165'));
 });
+
+// ───── Загрузка макета и статус заявки ─────
+
+const JPG = Buffer.from('fake jpg bytes').toString('base64');
+const upload = (h, over = {}) => h.call({ action: 'uploadLayout', password: ADMIN, company: 'global_food', row: 3, sku: '10165', fileName: 'макет.jpg', type: 'image/jpeg', data: JPG, ...over });
+
+test('layoutSizePart и layoutFileName: имя по правилу, занятое — со следующей версией', () => {
+  const h = loadCodeGs();
+  assert.equal(h.ctx.layoutSizePart('80 х 120'), '80x120');
+  assert.equal(h.ctx.layoutSizePart('40,5 × 95,6'), '40,5x95,6');
+  assert.equal(h.ctx.layoutSizePart(' D80 '), 'D80');
+  assert.equal(h.ctx.layoutSizePart('60_70/1'), '60701');
+  assert.equal(h.ctx.layoutFileName('ГФ', '19747', '80 х 120', 'jpg', []), 'ГФ_19747_80x120.jpg');
+  assert.equal(h.ctx.layoutFileName('СВ', '19392', '', 'png', []), 'СВ_19392.png');
+  assert.equal(h.ctx.layoutFileName('ГФ', '10165', '80 х 120', 'jpg', ['гф_10165_80x120.JPG', 'ГФ_10165_2_80x120.jpg']), 'ГФ_10165_3_80x120.jpg');
+});
+
+test('uploadLayout: только администратору; тип, размер и строка проверяются до Диска', () => {
+  const h = loadCodeGs({ layouts: LAYOUTS });
+  assert.equal(upload(h, { password: CLIENT }).error.code, 'ADMIN_REQUIRED');
+  assert.equal(upload(h, { type: 'image/gif' }).error.code, 'LAYOUT_UPLOAD_INVALID');
+  assert.equal(upload(h, { data: '' }).error.code, 'LAYOUT_UPLOAD_INVALID');
+  assert.equal(upload(h, { sku: '10167' }).error.code, 'ARTICLE_CHANGED');
+  assert.deepEqual(h.disk.uploads, []);
+  const noToken = loadCodeGs({ props: { YANDEX_DISK_TOKEN: null } });
+  assert.equal(upload(noToken).error.code, 'LAYOUTS_NOT_CONFIGURED');
+});
+
+test('uploadLayout: новый файл без токена в PUT, имя в «Макет» у всех строк артикула, старый — в корзину', () => {
+  const h = loadCodeGs({ layouts: LAYOUTS, sheetOptions: { layoutColumn: true } });
+  h.sheets[GF].data[2][3] = '80 х 120';
+  const reply = upload(h);
+  assert.equal(reply.ok, true);
+  assert.equal(reply.name, 'ГФ_10165_80x120.jpg');
+  assert.deepEqual(h.disk.uploads.map(u => [u.path, u.auth]), [[path('ГФ_10165_80x120.jpg'), '']]);
+  assert.ok(h.disk.uploads[0].bytes > 0);
+  assert.equal(sheetRow(h, GF, 3)[7], 'ГФ_10165_80x120.jpg');
+  assert.deepEqual(plain(reply.trashed), ['ГФ_10165_3_80x120.jpg']);
+  assert.deepEqual(h.disk.trash, [path('ГФ_10165_3_80x120.jpg')]);
+  assert.deepEqual(h.disk.filesIn(DISK_ROOT).filter(n => n.includes('10165')), ['ГФ_10165_80x120.jpg']);
+});
+
+test('uploadLayout: общий артикул 15053 — имя у обеих компаний, старый общий файл в корзину', () => {
+  const h = loadCodeGs({ layouts: LAYOUTS, sheetOptions: { layoutColumn: true } });
+  const gfRow = h.sheets[GF].data.findIndex(r => r[2] === '15053') + 1;
+  const reply = upload(h, { row: gfRow, sku: '15053', type: 'image/png' });
+  assert.equal(reply.name, 'ГФ_15053.png');
+  const names = [GF, SV].map(name => h.sheets[name].data.find(r => r[2] === '15053')[7]);
+  assert.deepEqual(names, ['ГФ_15053.png', 'ГФ_15053.png']);
+  assert.deepEqual(plain(reply.trashed), ['ГФ_15053_D35.jpg']);
+});
+
+test('uploadLayout: два старых файла по правилу — оба в корзину, остаётся новый', () => {
+  const h = loadCodeGs({ layouts: LAYOUTS, sheetOptions: { layoutColumn: true } });
+  const row = h.sheets[GF].data.findIndex(r => r[2] === '10350') + 1;
+  const reply = upload(h, { row, sku: '10350' });
+  assert.deepEqual(plain(reply.trashed).sort(), ['ГФ_10350_1.jpg', 'ГФ_10350_2.jpg']);
+  assert.deepEqual(h.disk.filesIn(DISK_ROOT).filter(n => n.includes('10350')), [reply.name]);
+});
+
+test('setOrderStatus: «Отгружено» и обратно, только администратору', () => {
+  const h = loadCodeGs();
+  const sent = h.order([['Глобал Фуд', '10165']]);
+  assert.equal(h.call({ action: 'setOrderStatus', password: CLIENT, number: sent.number, shipped: true }).error.code, 'ADMIN_REQUIRED');
+  assert.equal(h.call({ action: 'setOrderStatus', password: ADMIN, number: 'nope', shipped: true }).error.code, 'INVALID_ORDER_NUMBER');
+  assert.equal(h.call({ action: 'setOrderStatus', password: ADMIN, number: 'FB-9999 от 01.01.2026', shipped: true }).error.code, 'ORDER_NOT_FOUND');
+  assert.equal(h.call({ action: 'setOrderStatus', password: ADMIN, number: sent.number, shipped: true }).status, 'shipped');
+  assert.equal(h.rowOf(sent.number)[4], 'Отгружено');
+  assert.equal(h.call({ action: 'orders', password: CLIENT }).orders[0].status, 'shipped');
+  assert.equal(h.call({ action: 'setOrderStatus', password: ADMIN, number: sent.number, shipped: false }).status, '');
+  assert.equal(h.rowOf(sent.number)[4], '');
+});

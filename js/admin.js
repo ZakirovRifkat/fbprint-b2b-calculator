@@ -71,7 +71,7 @@ export function deleteOutcome(code) {
 // ADMIN_REQUIRED, коды *_FAILED и ARTICLE_* сервер уже объясняет целиком («Не удалось удалить заявку: …») — без приставки.
 export function adminErrorText(error, prefix) {
   const code = error?.code ?? '';
-  if (error?.reason && (code === 'ADMIN_REQUIRED' || code.endsWith('_FAILED') || code.startsWith('ARTICLE_'))) return error.reason;
+  if (error?.reason && (code === 'ADMIN_REQUIRED' || code.endsWith('_FAILED') || code.startsWith('ARTICLE_') || code.startsWith('LAYOUT_UPLOAD_'))) return error.reason;
   return `${prefix}: ${failureReason(error ?? {})}`;
 }
 
@@ -105,6 +105,7 @@ export async function postAction(action, fields = {}, timeoutMs) {
 }
 
 export const deleteOrderRequest = number => postAction('deleteOrder', { number }, 30000);
+export const setOrderStatusRequest = (number, shipped) => postAction('setOrderStatus', { number, shipped });
 export const rebuildLayoutsRequest = number => postAction('rebuildLayouts', { number });
 
 function node(tag, className, text) {
@@ -171,6 +172,26 @@ export function adminBar(entry, handlers = {}) {
     bar.append(actions);
   }
   return bar;
+}
+
+// Статус заявки у администратора — выпадающий список из двух значений, как в колонке E таблицы.
+// handlers — { onChange(entry, shipped), busy: '' | 'delete' | 'rebuild' | 'status' }.
+export function statusSelect(entry, handlers = {}) {
+  const select = node('select', 'sent-order-status');
+  const current = entry.status === 'shipped' ? 'shipped' : 'work';
+  [['work', 'В работе'], ['shipped', 'Отгружено']].forEach(([value, label]) => {
+    const option = node('option', '', label);
+    option.value = value;
+    option.selected = value === current;
+    select.append(option);
+  });
+  select.value = current;
+  select.dataset.cell = current;
+  select.dataset.focusKey = 'status';
+  select.setAttribute('aria-label', `Статус заявки ${entry.number}`);
+  select.disabled = Boolean(handlers.busy);
+  select.addEventListener('change', () => handlers.onChange?.(entry, select.value === 'shipped'));
+  return select;
 }
 
 // Корзина в строке заголовка заявки у администратора: удалить заявку можно, не раскрывая её.

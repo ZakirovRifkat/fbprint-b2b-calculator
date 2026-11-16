@@ -160,6 +160,8 @@ function doPost(e) {
   if (order.action === 'layoutPreviews') return json(layoutPreviewsReply(order, role));
   if (order.action === 'saveArticle') return json(saveArticleReply(order, role));
   if (order.action === 'deleteArticle') return json(deleteArticleReply(order, role));
+  if (order.action === 'uploadLayout') return json(uploadLayoutReply(order, role));
+  if (order.action === 'setOrderStatus') return json(setOrderStatusReply(order, role));
   try {
     if (order.action !== 'order') {
       return json({ error: { code: 'UNKNOWN_ACTION', message: 'Неизвестное действие' } });
@@ -1967,6 +1969,163 @@ function deleteArticleReply(request, role) {
     return articleError('ARTICLE_DELETE_FAILED', `Не удалось удалить артикул: ${error.message}`);
   } finally {
     lock.releaseLock();
+  }
+}
+
+// ───── Статус заявки с сайта ─────
+
+// setOrderStatus: { number, shipped: true | false }. «Отгружено» в колонке E или пусто («В работе»).
+// Меняется самая нижняя строка с этим номером — та же, что показывает сайт.
+function setOrderStatusReply(request, role) {
+  if (role !== 'admin') return { error: ADMIN_REQUIRED };
+  const number = field(request.number, 40);
+  if (!/^FB-\d+/.test(number)) return { error: INVALID_ORDER_NUMBER };
+  const shipped = request.shipped === true;
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+  } catch (error) {
+    return articleError('ORDER_STATUS_FAILED', 'Таблица занята другим запросом. Попробуйте через минуту');
+  }
+  try {
+    const sheet = ordersSheet();
+    const row = findOrderRow(sheet, number);
+    if (!row) return { error: orderNotFound(number) };
+    sheet.getRange(row, 5).setValue(shipped ? SHIPPED : '');
+    SpreadsheetApp.flush();
+    return { ok: true, number, status: shipped ? 'shipped' : '' };
+  } catch (error) {
+    console.error(error);
+    return articleError('ORDER_STATUS_FAILED', `Не удалось сменить статус заявки: ${error.message}`);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ───── Загрузка макета с сайта ─────
+// Файл кладётся в папку макетов с именем по правилу: «ГФ_19747_80x120.jpg». Имя вписывается в колонку «Макет»
+// у всех строк с этим артикулом на обоих листах: один артикул — один макет. Прежние файлы этого артикула
+// уходят в корзину Яндекс Диска (их можно восстановить оттуда), чтобы на Диске остался один актуальный.
+
+const LAYOUT_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
+const LAYOUT_UPLOAD_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'application/pdf': 'pdf' };
+
+// Размер для имени файла: «80 х 120» → «80x120», «D80» → «D80». «_» и запрещённые в именах знаки убираются.
+function layoutSizePart(size) {
+  return String(size === undefined || size === null ? '' : size)
+    .trim()
+    .replace(/\s*[xхXХ×*]\s*(?=[\d,.]+)/g, 'x')
+    .replace(/\s+/g, '')
+    .replace(/[\\/:*?"<>|_]/g, '');
+}
+
+// Свободное имя: «ГФ_19747_80x120.jpg»; занято — «ГФ_19747_2_80x120.jpg», «…_3_…» и так далее.
+function layoutFileName(prefix, sku, size, ext, takenNames) {
+  const sizePart = layoutSizePart(size);
+  const taken = new Set((takenNames || []).map(layoutKey));
+  const build = version => [prefix, sku].concat(version ? [String(version)] : [], sizePart ? [sizePart] : []).join('_') + `.${ext}`;
+  let version = 0;
+  let name = build(version);
+  while (taken.has(layoutKey(name))) {
+    version = version ? version + 1 : 2;
+    name = build(version);
+  }
+  return name;
+}
+
+// Адрес загрузки Диска: токен туда не отправляется, но чужой адрес мы и файл не отдаём.
+function isDiskUploadUrl(url) {
+  return /^https:\/\/([a-z0-9-]+\.)*(yandex\.ru|yandex\.net)\//.test(String(url || ''));
+}
+
+// Кладёт байты в path: запрос адреса загрузки, затем PUT на него. Ошибка — DiskError.
+function uploadDiskFile(path, bytes, type) {
+  const link = diskRequest('get', '/resources/upload', { path, overwrite: 'false' });
+  if (link.code >= 300) diskFail(link, 'Адрес загрузки');
+  const href = String(link.body.href || '');
+  if (!isDiskUploadUrl(href)) throw DiskError('fatal', 'Яндекс Диск вернул неожиданный адрес загрузки');
+  let response;
+  try {
+    response = UrlFetchApp.fetch(href, { method: 'put', payload: Utilities.newBlob(bytes, type), muteHttpExceptions: true });
+  } catch (error) {
+    throw DiskError('retry', `Яндекс Диск недоступен: ${error.message}`);
+  }
+  const code = response.getResponseCode();
+  if (code !== 201 && code !== 202) throw DiskError(diskErrorKind(code) || 'fatal', `Загрузка файла: Яндекс Диск ответил ${code}`);
+}
+
+// Все строки с артикулом sku на обоих листах: [{ sheet, row }].
+function articleRowsWithSku(sku) {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const found = [];
+  COMPANIES.forEach(company => {
+    const sheet = spreadsheet.getSheetByName(company.sheet);
+    if (!sheet || sheet.getLastRow() < 3) return;
+    sheet.getRange(3, 3, sheet.getLastRow() - 2, 1).getValues().forEach((value, index) => {
+      if (layoutKey(value[0]) === layoutKey(sku)) found.push({ sheet, row: index + 3 });
+    });
+  });
+  return found;
+}
+
+// uploadLayout: { company, row, sku, fileName, type, data (base64) }.
+function uploadLayoutReply(request, role) {
+  if (role !== 'admin') return { error: ADMIN_REQUIRED };
+  const config = layoutsConfig();
+  if (!config.token) return { error: LAYOUTS_NOT_CONFIGURED };
+  const target = articleSheetOf(request.company);
+  if (target.error) return { error: target.error };
+  const { company, sheet } = target;
+  const row = Number(request.row);
+  const sku = field(request.sku, ARTICLE_LIMITS.sku);
+  const type = field(request.type, 60).toLowerCase();
+  const ext = LAYOUT_UPLOAD_TYPES[type];
+  if (!ext) return articleError('LAYOUT_UPLOAD_INVALID', 'Макет должен быть JPG, PNG или PDF');
+  let bytes;
+  try {
+    bytes = Utilities.base64Decode(String(request.data || ''));
+  } catch (error) {
+    return articleError('LAYOUT_UPLOAD_INVALID', 'Файл не прочитался. Выберите его ещё раз');
+  }
+  if (!bytes.length) return articleError('LAYOUT_UPLOAD_INVALID', 'Файл пустой');
+  if (bytes.length > LAYOUT_UPLOAD_MAX_BYTES) return articleError('LAYOUT_UPLOAD_INVALID', 'Файл больше 20 МБ');
+  if (!sku || !articleRowMatches(sheet, row, sku)) return { error: ARTICLE_CHANGED };
+
+  try {
+    const files = listLayoutFiles(config.root, config.ordersRoot);
+    const size = sheet.getRange(row, 4).getValue();
+    const name = layoutFileName(company.layoutPrefix, sku, size, ext, files.map(file => file.name));
+    const path = `${config.root}/${name}`;
+    uploadDiskFile(path, bytes, type);
+
+    // Колонка «Макет» у всех строк этого артикула; старые файлы — те, что были в колонке или подходят по имени.
+    const old = new Map();
+    const lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+    try {
+      articleRowsWithSku(sku).forEach(place => {
+        const cell = place.sheet.getRange(place.row, LAYOUT_COLUMN);
+        const found = resolveLayout(sku, cell.getValue(), files);
+        if (found.file) old.set(found.file.path, found.file);
+        cell.setValue(name);
+      });
+      SpreadsheetApp.flush();
+    } finally {
+      lock.releaseLock();
+    }
+    matchLayoutFiles(sku, files).forEach(file => old.set(file.path, file));
+    const trashed = [];
+    old.forEach(file => {
+      if (diskPathKey(file.path) === diskPathKey(path) || !insideLayoutsRoot(file.path, config.root)) return;
+      const reply = diskRequest('delete', '/resources', { path: file.path, permanently: 'false' });
+      if (reply.code < 300) trashed.push(file.name);
+      else console.warn(`Старый макет ${file.path} не убран в корзину: ${reply.code}`);
+    });
+    return { ok: true, name, path, trashed };
+  } catch (error) {
+    console.error(error);
+    const reason = error.kind === 'auth' ? LAYOUT_ALERT_TEXT : error.message;
+    return articleError('LAYOUT_UPLOAD_FAILED', `Не удалось загрузить макет: ${reason}`);
   }
 }
 

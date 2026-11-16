@@ -282,6 +282,11 @@ button.article-preview:hover{background:var(--tint)}
 .article-company-name{display:inline-block;padding:var(--space-3) var(--space-5);border-radius:var(--radius-pill);background:var(--ink);color:var(--white);font-weight:var(--weight-bold)}
 .article-actions{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);margin-top:auto;padding-top:var(--space-2);border-top:var(--border-soft)}
 .article-actions .text-button{min-height:var(--tap);padding:0 var(--space-1);margin-left:calc(-1 * var(--space-1));font-size:var(--text-sm)}
+.article-action-links{display:flex;flex-wrap:wrap;column-gap:var(--space-4)}
+.sent-order-status{flex:none;align-self:center;margin:0 var(--space-3);min-height:var(--control);padding:0 var(--space-8) 0 var(--space-3);border:var(--border-field);border-radius:var(--radius-pill);font:inherit;font-size:var(--text-sm);font-weight:var(--weight-bold);cursor:pointer;appearance:none;-webkit-appearance:none;background:var(--white) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23181143' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right var(--space-3) center/14px}
+.sent-order-status[data-cell=work]{background-color:var(--warn-bg);border-color:transparent;color:var(--warn)}
+.sent-order-status[data-cell=shipped]{background-color:var(--good-bg);border-color:transparent;color:var(--good)}
+.sent-order-status:disabled{cursor:progress}
 .article-delete{width:var(--tap);height:var(--tap);display:grid;place-items:center;border:0;border-radius:var(--radius);background:none;color:var(--danger)}
 .article-delete:hover:not(:disabled),.article-delete:focus-visible{background:var(--danger-bg);color:var(--danger-dark)}
 .article-delete svg{width:var(--icon-sm);height:var(--icon-sm);fill:none;stroke:currentColor;stroke-width:var(--icon-stroke);stroke-linecap:round;stroke-linejoin:round}
@@ -520,6 +525,9 @@ body:has(#admin-badge:not([hidden])) .site-header{padding-top:var(--space-8)}
 .sent-order-lines{padding:0 var(--space-3) var(--space-3)}
 .sent-order-admin{padding:var(--space-1) var(--space-5)}
 .sent-order-delete{width:var(--tap)}
+.sent-order-top{flex-wrap:wrap}
+.sent-orders li .sent-order-top .sent-order-head{flex-basis:calc(100% - var(--tap))}
+.sent-order-status{order:3;margin:0 var(--space-5) var(--space-3)}
 .order-lines-table td[data-cell=code]{grid-column:1/-1}
 .order-lines-tabs{display:grid;grid-template-columns:1fr 1fr}
 .order-lines-tabs button{justify-content:center}

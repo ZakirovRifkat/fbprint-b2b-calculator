@@ -80,3 +80,14 @@ test('articleSavePayload: новый артикул — компания из ф
   assert.equal(sheetSize('80 × 120'), '80 х 120');
   assert.equal(sheetSize('40,5×95,6'), '40,5 х 95,6');
 });
+
+test('layoutFileProblem: JPG, PNG и PDF до 20 МБ; тип берётся и по расширению', async () => {
+  const { layoutFileProblem, layoutFileType } = await import('../js/articles.js');
+  assert.equal(layoutFileProblem({ name: 'a.jpg', type: 'image/jpeg', size: 10 }), '');
+  assert.equal(layoutFileType({ name: 'макет.PDF', type: '', size: 10 }), 'application/pdf');
+  assert.equal(layoutFileType({ name: 'a.jpeg', type: '' }), 'image/jpeg');
+  assert.equal(layoutFileProblem({ name: 'a.gif', type: 'image/gif', size: 10 }), 'Макет должен быть JPG, PNG или PDF');
+  assert.equal(layoutFileProblem({ name: 'a.png', type: 'image/png', size: 0 }), 'Файл пустой');
+  assert.equal(layoutFileProblem({ name: 'a.png', type: 'image/png', size: 21 * 1024 * 1024 }), 'Файл больше 20 МБ');
+  assert.equal(layoutFileProblem(null), 'Файл не выбран');
+});

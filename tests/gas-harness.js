@@ -174,6 +174,7 @@ export const DISK_ROOT = 'disk:/ФБ-ПРИНТ/ГлобалФуд_Студия�
 export const DISK_ORDERS = 'disk:/ФБ-ПРИНТ/Макеты_по_заявкам';
 const API = 'https://cloud-api.yandex.net/v1/disk';
 export const PREVIEW_HOST = 'https://downloader.disk.yandex.ru';
+export const UPLOAD_HOST = 'https://uploader1.disk.yandex.net';
 
 const resp = (code, body) => ({
   getResponseCode: () => code,
@@ -205,6 +206,15 @@ export function makeDisk() {
     dirsIn(path) { return disk.children(path).filter(p => nodes.get(p).type === 'dir'); },
     copies() { return disk.requests.filter(r => r.kind === 'copy'); },
     previewDownloads: [],
+    trash: [],
+    uploads: [],
+    // PUT файла на адрес загрузки: токен туда не нужен и не должен уходить.
+    uploadReply(url, options = {}) {
+      const path = decodeURIComponent(new URL(url).pathname.replace(/^\/upload\//, ''));
+      disk.uploads.push({ path, bytes: options.payload?.getBytes?.().length ?? 0, auth: options.headers?.Authorization ?? '' });
+      nodes.set(path, { type: 'file' });
+      return resp(201);
+    },
     // Картинка превью: байты — путь файла, чтобы в тесте было видно, чьё это превью.
     previewReply(url, options = {}) {
       const path = decodeURIComponent(new URL(url).pathname.replace(/^\/preview\//, ''));
@@ -229,6 +239,8 @@ export function makeDisk() {
     else if (path === '/resources' && method === 'put') kind = 'mkdir';
     else if (path === '/resources' && q.fields === 'public_url') kind = 'publicUrl';
     else if (path === '/resources' && q.fields === 'preview') kind = 'previewInfo';
+    else if (path === '/resources/upload') kind = 'uploadLink';
+    else if (path === '/resources' && method === 'delete') kind = 'delete';
     else if (path === '/resources') kind = 'list';
     else if (path === '' || path === '/') kind = 'info';
     const req = { kind, method, path, query: q, url };
@@ -253,6 +265,16 @@ export function makeDisk() {
       const offset = Number(q.offset) || 0;
       const limit = Math.min(Number(q.limit) || 20, disk.pageLimit || Infinity);
       return resp(200, { _embedded: { items: items.slice(offset, offset + limit), total: items.length, offset, limit } });
+    }
+    if (kind === 'uploadLink') {
+      if (nodes.has(q.path) && q.overwrite !== 'true') return resp(409, { error: 'DiskResourceAlreadyExistsError' });
+      return resp(200, { href: `${UPLOAD_HOST}/upload/${encodeURIComponent(q.path)}`, method: 'PUT' });
+    }
+    if (kind === 'delete') {
+      if (!nodes.has(q.path)) return resp(404, { error: 'DiskNotFoundError' });
+      nodes.delete(q.path);
+      disk.trash.push(q.path);
+      return resp(204);
     }
     if (kind === 'previewInfo') {
       const node = nodes.get(q.path);
@@ -343,6 +365,7 @@ export function loadCodeGs(options = {}) {
     if (url.startsWith('https://api.telegram.org/')) return telegramHandle(url, opts);
     if (url.startsWith('https://cloud-api.yandex.net/')) return disk.handle(url, opts);
     if (url.startsWith(`${PREVIEW_HOST}/preview/`)) return disk.previewReply(url, opts);
+    if (url.startsWith(`${UPLOAD_HOST}/upload/`)) return disk.uploadReply(url, opts);
     throw new Error(`no network in tests: ${url}`);
   };
 

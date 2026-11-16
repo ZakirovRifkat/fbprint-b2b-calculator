@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { state } from '../js/state.js';
 import {
   LAYOUTS_REFRESH_MS, adminBar, adminErrorText, deleteOrderButton, deleteOrderRequest, deleteOutcome, hasPendingLayouts, isAdmin,
-  layoutsView, needsLayoutsRefresh, postAction, problemsText, rebuildLabel, rebuildLayoutsRequest, roleOf
+  layoutsView, needsLayoutsRefresh, postAction, problemsText, rebuildLabel, rebuildLayoutsRequest, roleOf, statusSelect
 } from '../js/admin.js';
 import { forgetPassword } from '../js/auth.js';
 import { memoryStorage, setStorage } from './helpers.js';
@@ -226,4 +226,19 @@ test('rebuildLabel: есть папка — «Пересобрать папку�
 test('adminBar: пробелы вокруг ссылки обрезаются', () => {
   const bar = adminBar(entry({ status: 'done', url: '  https://disk.yandex.ru/d/X  ', problems: [] }));
   assert.equal(links(bar)[0].getAttribute('href'), 'https://disk.yandex.ru/d/X');
+});
+
+test('statusSelect: два значения как в таблице; смена вызывает onChange; busy выключает', () => {
+  const calls = [];
+  const select = statusSelect({ number: 'FB-0001', status: '' }, { onChange: (e, shipped) => calls.push([e.number, shipped]) });
+  assert.equal(select.tagName, 'SELECT');
+  assert.deepEqual(select.children.map(o => [o.value, o.textContent]), [['work', 'В работе'], ['shipped', 'Отгружено']]);
+  assert.equal(select.value, 'work');
+  assert.equal(select.dataset.cell, 'work');
+  assert.equal(select.getAttribute('aria-label'), 'Статус заявки FB-0001');
+  select.value = 'shipped';
+  (select.listeners.change || []).forEach(listener => listener({ type: 'change', target: select }));
+  assert.deepEqual(calls, [['FB-0001', true]]);
+  assert.equal(statusSelect({ number: 'FB-0002', status: 'shipped' }).value, 'shipped');
+  assert.equal(statusSelect({ number: 'FB-0002', status: 'shipped' }, { busy: 'status' }).disabled, true);
 });

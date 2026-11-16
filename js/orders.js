@@ -7,7 +7,7 @@ import { renderDock } from './order.js';
 import { toast } from './toast.js';
 import { confirmAction } from './confirm.js';
 import { forgetArticles, loadArticles } from './articles.js';
-import { LAYOUTS_REFRESH_MS, adminBar, adminErrorText, deleteOrderButton, deleteOrderRequest, deleteOutcome, isAdmin, needsLayoutsRefresh, rebuildLayoutsRequest, roleOf } from './admin.js';
+import { LAYOUTS_REFRESH_MS, adminBar, adminErrorText, deleteOrderButton, deleteOrderRequest, setOrderStatusRequest, statusSelect, deleteOutcome, isAdmin, needsLayoutsRefresh, rebuildLayoutsRequest, roleOf } from './admin.js';
 
 // Вкладка «Заявки»: все заявки с листа «Заявки» в таблице, новые сверху.
 // Пароль один на всех, поэтому список общий для всех клиентов.
@@ -15,7 +15,7 @@ import { LAYOUTS_REFRESH_MS, adminBar, adminErrorText, deleteOrderButton, delete
 export const statusLabels = { work: 'В работе', shipped: 'Отгружено' };
 export const dateTime = new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-// «Отгружено» ставит менеджер в таблице (лист «Заявки», колонка E); всё остальное — «В работе».
+// «Отгружено» ставит администратор на сайте или менеджер в таблице (лист «Заявки», колонка E); всё остальное — «В работе».
 export function orderStatus(entry) {
   return entry.status === 'shipped' ? 'shipped' : 'work';
 }
@@ -48,7 +48,8 @@ export function renderOrders(list = state.ordersList) {
     head.append(
       cell('strong', entry.number),
       cell('span', [Number.isNaN(sentAt.getTime()) ? '' : dateTime.format(sentAt), entry.company].filter(Boolean).join(' · ')),
-      cell('em', statusLabels[orderStatus(entry)], orderStatus(entry)),
+      // У администратора статус — выпадающий список рядом с заголовком, метка в заголовке не нужна.
+      ...(admin ? [] : [cell('em', statusLabels[orderStatus(entry)], orderStatus(entry))]),
       cell('b', money.format(entry.total))
     );
     head.insertAdjacentHTML('beforeend', '<svg class="sent-order-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>');
@@ -70,7 +71,8 @@ export function renderOrders(list = state.ordersList) {
       // Отдельной кнопкой рядом: внутри кнопки заголовка другую кнопку разместить нельзя.
       const top = document.createElement('div');
       top.className = 'sent-order-top';
-      top.append(head, deleteOrderButton(entry, { onDelete: deleteOrderWithConfirm, busy: busyOrders.get(entry.number) ?? '' }));
+      const busy = busyOrders.get(entry.number) ?? '';
+      top.append(head, statusSelect(entry, { onChange: changeStatus, busy }), deleteOrderButton(entry, { onDelete: deleteOrderWithConfirm, busy }));
       item.append(top);
     } else {
       item.append(head);
@@ -142,6 +144,27 @@ function adminActionFailed(error, prefix) {
 }
 
 // Удаление: заявка и её позиции исчезают с обоих листов таблицы. Папка на Яндекс Диске остаётся.
+// Смена статуса в списке: пишет «Отгружено» в колонку E «Заявок» или очищает её. Подтверждения нет — статус легко вернуть.
+async function changeStatus(entry, shipped) {
+  busyOrders.set(entry.number, 'status');
+  renderOrders();
+  try {
+    const reply = await setOrderStatusRequest(entry.number, shipped);
+    const current = state.ordersList.find(item => item.number === entry.number);
+    if (current) current.status = reply.status;
+    toast(shipped ? `Заявка ${entry.number} отгружена.` : `Заявка ${entry.number} снова в работе.`);
+  } catch (error) {
+    busyOrders.delete(entry.number);
+    renderOrders();
+    focusOrderControl(entry.number, 'status');
+    adminActionFailed(error, 'Статус не изменён');
+    return;
+  }
+  busyOrders.delete(entry.number);
+  renderOrders();
+  focusOrderControl(entry.number, 'status');
+}
+
 async function deleteOrderWithConfirm(entry) {
   const confirmed = await confirmAction({
     title: `Удалить заявку ${entry.number}?`,

@@ -20,7 +20,7 @@ Content-Type: text/plain;charset=UTF-8
 ## Роли
 
 - `client` — пароль `ACCESS_PASSWORD`. Всё, что было до ролей: каталог, заявки, список заявок.
-- `admin` — пароль `ADMIN_PASSWORD`. То же, что у клиента, плюс папки макетов в списке заявок, `deleteOrder`, `rebuildLayouts`, `articleLayouts`, `layoutPreviews`, `saveArticle` и `deleteArticle`.
+- `admin` — пароль `ADMIN_PASSWORD`. То же, что у клиента, плюс папки макетов в списке заявок, `deleteOrder`, `rebuildLayouts`, `articleLayouts`, `layoutPreviews`, `saveArticle`, `deleteArticle`, `uploadLayout` и `setOrderStatus`.
 - `ADMIN_PASSWORD`, равный `ACCESS_PASSWORD`, админом не делает: с ним входят как клиент. Не задан `ADMIN_PASSWORD` — администратора нет.
 - Ответы `catalog` и `orders` несут `"role": "client" | "admin"`. Сайт роль не хранит, хранит только пароль; скрипт определяет роль по паролю заново на каждом запросе.
 - Действие администратора с паролем клиента получает `ADMIN_REQUIRED`. Это не выход: сайт переключается в роль клиента и не спрашивает пароль снова.
@@ -159,7 +159,7 @@ Apps Script не умеет менять HTTP-статус, поэтому ош�
 | `ACCESS_NOT_CONFIGURED` | в свойствах скрипта не задан ни `ACCESS_PASSWORD`, ни `ADMIN_PASSWORD` |
 | `ADMIN_REQUIRED` | действие администратора с паролем клиента: «Это действие доступно только администратору» |
 | `INVALID_REQUEST` | тело запроса не JSON |
-| `UNKNOWN_ACTION` | `action` не равен `catalog`, `order`, `orders`, `orderLines`, `deleteOrder`, `rebuildLayouts`, `articleLayouts`, `layoutPreviews`, `saveArticle` или `deleteArticle` |
+| `UNKNOWN_ACTION` | `action` не равен `catalog`, `order`, `orders`, `orderLines`, `deleteOrder`, `rebuildLayouts`, `articleLayouts`, `layoutPreviews`, `saveArticle`, `deleteArticle`, `uploadLayout` или `setOrderStatus` |
 | `CATALOG_READ_FAILED` | лист не найден, нет доступа или другая ошибка чтения |
 | `INVALID_ORDER_NUMBER` | `deleteOrder`, `rebuildLayouts`: номер не начинается с `FB-` и цифр |
 | `ORDER_NOT_FOUND` | `deleteOrder`, `rebuildLayouts`: такой заявки нет на листе «Заявки» |
@@ -170,6 +170,9 @@ Apps Script не умеет менять HTTP-статус, поэтому ош�
 | `ARTICLE_DUPLICATE` | `saveArticle`: такой артикул уже есть на листе этой компании |
 | `ARTICLE_CHANGED` | `saveArticle`, `deleteArticle`: в строке уже другой артикул или её нет — таблицу изменили |
 | `ARTICLE_SAVE_FAILED`, `ARTICLE_DELETE_FAILED` | не удалось записать лист или он занят |
+| `LAYOUT_UPLOAD_INVALID` | `uploadLayout`: не JPG/PNG/PDF, пустой файл или больше 20 МБ |
+| `LAYOUT_UPLOAD_FAILED` | `uploadLayout`: Яндекс Диск не принял файл |
+| `ORDER_STATUS_FAILED` | `setOrderStatus`: не удалось записать статус |
 | `LAYOUT_PREVIEW_FAILED` | `layoutPreviews`: Яндекс Диск не отдал превью (например, не принял токен) |
 | `LAYOUTS_QUEUE_FAILED` | `rebuildLayouts`: не удалось записать статус на лист |
 
@@ -372,3 +375,29 @@ Content-Type: text/plain;charset=UTF-8
 
 - Удаляет строку целиком, если в ней этот артикул; иначе `ARTICLE_CHANGED`. Строки ниже сдвигаются вверх. Макет на Диске остаётся.
 - `articleLayouts` для формы отдаёт у каждого артикула ещё `category`, `color`, `layoutCell` (значение колонки H как есть) и общий список имён файлов `fileNames`.
+
+## Загрузка макета
+
+Только администратор.
+
+```json
+{ "action": "uploadLayout", "password": "…", "company": "global_food", "row": 145, "sku": "19747",
+  "fileName": "макет.jpg", "type": "image/jpeg", "data": "<base64>" }
+```
+
+- Типы: `image/jpeg`, `image/png`, `application/pdf`; до 20 МБ. Строка `row` должна содержать `sku`, иначе `ARTICLE_CHANGED`.
+- Имя файла — по правилу: `<ГФ|СВ>_<артикул>_<размер>.<расширение>`, размер из колонки D без пробелов («80 х 120» → `80x120`). Имя занято — `…_2_…`, `…_3_…`.
+- Файл кладётся в `LAYOUTS_ROOT`. Имя пишется в колонку «Макет» у всех строк с этим артикулом на обоих листах.
+- Прежние файлы артикула (из колонки «Макет» и подходящие по имени) уходят в корзину Яндекс Диска.
+- Успех: `{ "ok": true, "name": "ГФ_19747_80x120.jpg", "path": "disk:/…", "trashed": ["ГФ_19747_1_80x120.jpg"] }`.
+
+## Статус заявки
+
+Только администратор.
+
+```json
+{ "action": "setOrderStatus", "password": "…", "number": "FB-0042 от 09.11.2026", "shipped": true }
+```
+
+- `shipped: true` пишет «Отгружено» в колонку E самой нижней строки с этим номером, `false` — очищает её («В работе»).
+- Успех: `{ "ok": true, "number": "…", "status": "shipped" }` или `"status": ""`. Ошибки: `ADMIN_REQUIRED`, `INVALID_ORDER_NUMBER`, `ORDER_NOT_FOUND`, `ORDER_STATUS_FAILED`.

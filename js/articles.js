@@ -56,6 +56,26 @@ export function articleCounts(list, company = ALL) {
 
 export const articleLayoutsRequest = () => postAction('articleLayouts', {}, 60000);
 export const saveArticleRequest = fields => postAction('saveArticle', fields, 30000);
+export const uploadLayoutRequest = fields => postAction('uploadLayout', fields, 180000);
+
+export const LAYOUT_MAX_BYTES = 20 * 1024 * 1024;
+const LAYOUT_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf' };
+
+// Тип файла макета по MIME или расширению. '' — такой файл не принимаем.
+export function layoutFileType(file) {
+  const byMime = Object.values(LAYOUT_TYPES).includes(file?.type) ? file.type : '';
+  const ext = String(file?.name ?? '').split('.').pop().toLowerCase();
+  return byMime || LAYOUT_TYPES[ext] || '';
+}
+
+// Почему файл нельзя загрузить. '' — можно.
+export function layoutFileProblem(file) {
+  if (!file) return 'Файл не выбран';
+  if (!layoutFileType(file)) return 'Макет должен быть JPG, PNG или PDF';
+  if (!file.size) return 'Файл пустой';
+  if (file.size > LAYOUT_MAX_BYTES) return 'Файл больше 20 МБ';
+  return '';
+}
 export const deleteArticleRequest = fields => postAction('deleteArticle', fields, 30000);
 
 // Поля формы артикула → тело запроса saveArticle. original — артикул, который правят (null — новый).
@@ -245,7 +265,15 @@ function articleCard(article) {
   remove.setAttribute('aria-label', `Удалить артикул ${article.sku}`);
   remove.innerHTML = TRASH_ICON;
   remove.addEventListener('click', () => deleteArticleWithConfirm(article, remove));
-  actions.append(editButton, remove);
+  const hasFile = Boolean(article.path) || article.problem === 'conflict' || article.problem === 'notFound';
+  const uploadButton = node('button', 'text-button', hasFile ? 'Заменить макет' : 'Загрузить макет');
+  uploadButton.type = 'button';
+  uploadButton.dataset.uploadFor = `${article.companyId}/${article.row}`;
+  uploadButton.setAttribute('aria-label', `${hasFile ? 'Заменить' : 'Загрузить'} макет артикула ${article.sku}`);
+  uploadButton.addEventListener('click', () => pickLayoutFile(article));
+  const links = node('div', 'article-action-links');
+  links.append(editButton, uploadButton);
+  actions.append(links, remove);
   body.append(actions);
   card.append(body);
   return card;
@@ -526,6 +554,7 @@ let refreshCatalog = null;
 function initArticleForm(onCatalogChange) {
   refreshCatalog = onCatalogChange;
   $('#add-article').addEventListener('click', () => openArticleForm());
+  $('#layout-file').addEventListener('change', event => uploadLayout(event.target.files?.[0]));
   $('#article-form').addEventListener('submit', submitArticleForm);
   $('#article-cancel').addEventListener('click', () => $('#article-dialog').close());
   $('#close-article-dialog').addEventListener('click', () => $('#article-dialog').close());
@@ -541,6 +570,64 @@ function initArticleForm(onCatalogChange) {
   $('#article-dialog').addEventListener('cancel', event => {
     if ($('#article-submit').disabled) event.preventDefault();
   });
+}
+
+// ───── Загрузка макета ─────
+// Файл уходит в папку макетов на Яндекс Диске с именем по правилу («ГФ_19747_80x120.jpg»).
+// Прежние файлы этого артикула скрипт убирает в корзину Диска: остаётся один актуальный макет.
+let uploadFor = null;
+
+function pickLayoutFile(article) {
+  uploadFor = article;
+  const input = $('#layout-file');
+  input.value = '';
+  input.click();
+}
+
+function readBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+    reader.onerror = () => reject(reader.error ?? new Error('файл не прочитался'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadLayout(file) {
+  const article = uploadFor;
+  uploadFor = null;
+  if (!article || !file) return;
+  const problem = layoutFileProblem(file);
+  if (problem) {
+    toast(problem, { persist: true });
+    return;
+  }
+  const replacing = Boolean(article.path) || article.problem === 'conflict' || article.problem === 'notFound';
+  if (replacing) {
+    const old = article.path ? article.layout : (article.candidates ?? []).join(', ');
+    const confirmed = await confirmAction({
+      title: `Заменить макет ${article.sku}?`,
+      message: `Новый файл станет макетом артикула ${article.sku} у всех компаний. ${old ? `Старый (${old}) уйдёт в корзину Яндекс Диска, оттуда его можно восстановить.` : ''}`.trim(),
+      confirmLabel: 'Заменить'
+    });
+    if (!confirmed) return;
+  }
+  const button = document.querySelector(`[data-upload-for="${article.companyId}/${article.row}"]`);
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Загружаем…';
+  }
+  try {
+    const data = await readBase64(file);
+    const reply = await uploadLayoutRequest({
+      company: article.companyId, row: article.row, sku: article.sku, fileName: file.name, type: layoutFileType(file), data
+    });
+    toast(`Макет ${reply.name} загружен на Яндекс Диск.`);
+    await loadArticles({ force: true });
+  } catch (failure) {
+    toast(adminErrorText(failure, 'Макет не загружен'), { persist: true });
+    renderArticles();
+  }
 }
 
 // ───── События ─────
