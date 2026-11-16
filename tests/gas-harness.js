@@ -173,6 +173,7 @@ export function defaultSheets({ layoutColumn = false, gfLayouts = {}, svLayouts 
 export const DISK_ROOT = 'disk:/ФБ-ПРИНТ/ГлобалФуд_СтудияВкуса/Актуальные_макеты';
 export const DISK_ORDERS = 'disk:/ФБ-ПРИНТ/Макеты_по_заявкам';
 const API = 'https://cloud-api.yandex.net/v1/disk';
+export const PREVIEW_HOST = 'https://downloader.disk.yandex.ru';
 
 const resp = (code, body) => ({
   getResponseCode: () => code,
@@ -202,7 +203,16 @@ export function makeDisk() {
     },
     filesIn(path) { return disk.children(path).filter(p => nodes.get(p).type === 'file').map(p => p.split('/').pop()); },
     dirsIn(path) { return disk.children(path).filter(p => nodes.get(p).type === 'dir'); },
-    copies() { return disk.requests.filter(r => r.kind === 'copy'); }
+    copies() { return disk.requests.filter(r => r.kind === 'copy'); },
+    previewDownloads: [],
+    // Картинка превью: байты — путь файла, чтобы в тесте было видно, чьё это превью.
+    previewReply(url, options = {}) {
+      const path = decodeURIComponent(new URL(url).pathname.replace(/^\/preview\//, ''));
+      disk.previewDownloads.push(path);
+      if (options.headers?.Authorization !== `OAuth ${disk.validToken}`) return resp(401, 'Unauthorized');
+      const bytes = [...Buffer.from(path, 'utf8')];
+      return Object.assign(resp(200, ''), { getBlob: () => ({ getBytes: () => bytes, getContentType: () => 'image/jpeg' }) });
+    }
   };
   ['disk:/ФБ-ПРИНТ', 'disk:/ФБ-ПРИНТ/ГлобалФуд_СтудияВкуса', DISK_ROOT].forEach(p => disk.addDir(p));
 
@@ -218,6 +228,7 @@ export function makeDisk() {
     else if (path === '/resources/publish') kind = 'publish';
     else if (path === '/resources' && method === 'put') kind = 'mkdir';
     else if (path === '/resources' && q.fields === 'public_url') kind = 'publicUrl';
+    else if (path === '/resources' && q.fields === 'preview') kind = 'previewInfo';
     else if (path === '/resources') kind = 'list';
     else if (path === '' || path === '/') kind = 'info';
     const req = { kind, method, path, query: q, url };
@@ -242,6 +253,12 @@ export function makeDisk() {
       const offset = Number(q.offset) || 0;
       const limit = Math.min(Number(q.limit) || 20, disk.pageLimit || Infinity);
       return resp(200, { _embedded: { items: items.slice(offset, offset + limit), total: items.length, offset, limit } });
+    }
+    if (kind === 'previewInfo') {
+      const node = nodes.get(q.path);
+      if (!node || node.type !== 'file') return resp(404, { error: 'DiskNotFoundError' });
+      if (node.noPreview) return resp(200, {});
+      return resp(200, { preview: `${PREVIEW_HOST}/preview/${encodeURIComponent(q.path)}?size=${q.preview_size}` });
     }
     if (kind === 'publicUrl') {
       const node = nodes.get(q.path);
@@ -325,6 +342,7 @@ export function loadCodeGs(options = {}) {
     fetchLog.push({ url, method: String(opts.method || 'get').toLowerCase() });
     if (url.startsWith('https://api.telegram.org/')) return telegramHandle(url, opts);
     if (url.startsWith('https://cloud-api.yandex.net/')) return disk.handle(url, opts);
+    if (url.startsWith(`${PREVIEW_HOST}/preview/`)) return disk.previewReply(url, opts);
     throw new Error(`no network in tests: ${url}`);
   };
 
@@ -418,6 +436,7 @@ export function loadCodeGs(options = {}) {
           .replace('ss', pad(d.getUTCSeconds()));
       },
       base64Decode: text => [...Buffer.from(text, 'base64')],
+      base64Encode: bytes => Buffer.from(bytes).toString('base64'),
       newBlob: (bytes, type, name) => ({ getBytes: () => bytes, getContentType: () => type, getName: () => name })
     },
     ContentService: {
@@ -441,6 +460,7 @@ export function loadCodeGs(options = {}) {
     sleeps,
     logs,
     triggers,
+    cache,
     locks,
     ui,
     fakes,

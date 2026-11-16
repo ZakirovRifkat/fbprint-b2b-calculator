@@ -8,7 +8,8 @@ import { apiUrl, applyCatalog, loadData } from './load.js';
 import { addLine, hideSearch, quantity, renderCalculation, renderSearch, renderSelected, setQuantity } from './calculator.js';
 import { clearOrderWithConfirm, orderFilter, readSavedOrder, renderDock, renderOrder, resetOrderFilters } from './order.js';
 import { addImportedLines, evaluateImportRow, fixable, importFile, renderImport, restoreImportRow } from './import.js';
-import { loadOrders, renderOrders, showView } from './orders.js';
+import { currentView, loadOrders, renderOrders, showView } from './orders.js';
+import { initArticles, loadArticles } from './articles.js';
 import { openOrderDialog, orderSending, submitOrder } from './submit.js';
 import { downloadExcel } from './excel.js';
 import { hideToast, restartToastTimer, toast } from './toast.js';
@@ -203,7 +204,10 @@ $('#order-form').addEventListener('submit', event => {
   $('#order-dialog').close();
   toast('Демо-режим: заявка не отправлена менеджеру.');
 });
-$('#refresh-data').addEventListener('click', loadData);
+$('#refresh-data').addEventListener('click', () => {
+  loadData();
+  loadArticles({ force: true });
+});
 $('#login-form').addEventListener('submit', event => {
   event.preventDefault();
   const value = $('#login-password').value.trim();
@@ -230,10 +234,13 @@ showView();
 window.addEventListener('hashchange', () => {
   showView();
   window.scrollTo(0, 0);
-  $(location.hash === '#orders' ? '#orders-title' : '#page-title').focus({ preventScroll: true });
+  const titles = { calc: '#page-title', orders: '#orders-title', articles: '#articles-title' };
+  $(titles[currentView()]).focus({ preventScroll: true });
   if (location.hash === '#orders') loadOrders();
+  if (location.hash === '#articles') loadArticles();
 });
-document.querySelectorAll('.orders-filter button').forEach(button => button.addEventListener('click', () => {
+initArticles();
+document.querySelectorAll('#orders-toolbar .orders-filter button').forEach(button => button.addEventListener('click', () => {
   state.ordersFilter = button.dataset.filter;
   renderOrders();
 }));

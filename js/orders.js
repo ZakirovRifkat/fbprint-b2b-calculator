@@ -6,6 +6,7 @@ import { apiUrl, loadData } from './load.js';
 import { renderDock } from './order.js';
 import { toast } from './toast.js';
 import { confirmAction } from './confirm.js';
+import { forgetArticles, loadArticles } from './articles.js';
 import { LAYOUTS_REFRESH_MS, adminBar, adminErrorText, deleteOrderButton, deleteOrderRequest, deleteOutcome, isAdmin, needsLayoutsRefresh, rebuildLayoutsRequest, roleOf } from './admin.js';
 
 // Вкладка «Заявки»: все заявки с листа «Заявки» в таблице, новые сверху.
@@ -32,7 +33,7 @@ export function renderOrders(list = state.ordersList) {
   const counts = { all: list.length, work: 0, shipped: 0 };
   list.forEach(entry => { counts[orderStatus(entry)] += 1; });
   Object.entries(counts).forEach(([filter, count]) => { $(`#filter-${filter}`).textContent = count; });
-  document.querySelectorAll('.orders-filter button').forEach(button => {
+  document.querySelectorAll('#orders-toolbar .orders-filter button').forEach(button => {
     button.setAttribute('aria-pressed', String(button.dataset.filter === state.ordersFilter));
   });
   const shown = list.filter(entry => state.ordersFilter === 'all' || orderStatus(entry) === state.ordersFilter);
@@ -91,7 +92,7 @@ export function renderOrders(list = state.ordersList) {
   }
   $('#orders-empty').hidden = !state.ordersLoaded || list.length > 0;
   $('#orders-toolbar').hidden = false;
-  $('.orders-filter').hidden = !list.length;
+  $('#orders-toolbar .orders-filter').hidden = !list.length;
   root.hidden = !shown.length;
   $('#orders-none').hidden = !list.length || shown.length > 0;
   $('#orders-none').textContent = state.ordersFilter === 'shipped' ? 'Отгруженных заявок пока нет.' : 'Все заявки отгружены.';
@@ -103,6 +104,13 @@ export function renderOrders(list = state.ordersList) {
 function renderAdminChrome() {
   const admin = isAdmin();
   $('#admin-badge').hidden = !admin;
+  // Вкладка «Артикулы» — только у администратора. Открыта, а роль клиентская — показываем расчёт.
+  $('#articles-tab').hidden = !admin;
+  if (!admin) forgetArticles();
+  if (location.hash === '#articles') {
+    showView();
+    loadArticles();
+  }
   $('#orders-admin-alert').textContent = admin ? state.ordersAlert : '';
   $('#orders-admin-alert').hidden = !admin || !state.ordersAlert;
 }
@@ -359,16 +367,25 @@ export async function loadOrders({ quiet = false } = {}) {
   }
 }
 
-// Вкладки в шапке. Раздел задаёт адрес: #orders — заявки, всё остальное — расчёт.
-// Так работают кнопка «Назад» и ссылка на раздел.
+// Вкладки в шапке. Раздел задаёт адрес: #orders — заявки, #articles — артикулы (только администратору),
+// всё остальное — расчёт. Так работают кнопка «Назад» и ссылка на раздел.
+export function currentView() {
+  if (location.hash === '#orders') return 'orders';
+  if (location.hash === '#articles' && isAdmin()) return 'articles';
+  return 'calc';
+}
+
+const VIEW_TITLES = { calc: 'FB-print — Расчёт стоимости', orders: 'FB-print — Заявки', articles: 'FB-print — Артикулы' };
+
 export function showView() {
-  const view = location.hash === '#orders' ? 'orders' : 'calc';
+  const view = currentView();
   $('#top').hidden = view !== 'calc';
   $('#orders-view').hidden = view !== 'orders';
+  $('#articles-view').hidden = view !== 'articles';
   document.querySelectorAll('.view-tabs a').forEach(tab => {
     if (tab.dataset.view === view) tab.setAttribute('aria-current', 'page');
     else tab.removeAttribute('aria-current');
   });
-  document.title = view === 'orders' ? 'FB-print — Заявки' : 'FB-print — Расчёт стоимости';
+  document.title = VIEW_TITLES[view];
   renderDock();
 }

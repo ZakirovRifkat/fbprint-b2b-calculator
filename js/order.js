@@ -404,7 +404,7 @@ export function renderOrder() {
 
 // Полоса с итогом внизу экрана — пока в заявке есть позиции, а её собственный итог не виден.
 export function renderDock() {
-  const visible = state.order.length > 0 && !state.orderFooterVisible && location.hash !== '#orders';
+  const visible = state.order.length > 0 && !state.orderFooterVisible && !document.querySelector('#top').hidden;
   const dock = $('#order-dock');
   dock.dataset.visible = String(visible);
   dock.inert = !visible;

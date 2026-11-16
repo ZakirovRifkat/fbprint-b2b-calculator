@@ -156,6 +156,8 @@ function doPost(e) {
   }
   if (order.action === 'deleteOrder') return json(deleteOrderReply(order, role));
   if (order.action === 'rebuildLayouts') return json(rebuildLayoutsReply(order, role));
+  if (order.action === 'articleLayouts') return json(articleLayoutsReply(role));
+  if (order.action === 'layoutPreviews') return json(layoutPreviewsReply(order, role));
   try {
     if (order.action !== 'order') {
       return json({ error: { code: 'UNKNOWN_ACTION', message: 'Неизвестное действие' } });
@@ -1653,6 +1655,171 @@ function rebuildLayouts(number) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// ───── Вкладка «Артикулы» у администратора ─────
+// Сайт показывает каждый артикул с его макетом: имя файла, ссылку на файл в Яндекс Диске и превью.
+// Файлы не публикуются. Ссылка открывает файл у того, кто вошёл в этот аккаунт Яндекса,
+// а превью скрипт сам скачивает с токеном и отдаёт сайту картинкой.
+
+const LAYOUT_PREVIEW_SIZE = 'M';         // около 300 px по ширине: хватает для карточки
+const LAYOUT_PREVIEW_BATCH = 12;         // превью за один запрос сайта
+const LAYOUT_PREVIEW_CACHE_S = 21600;    // готовое превью лежит в кэше 6 часов
+const LAYOUT_PREVIEW_CACHE_MAX = 100000; // CacheService хранит до 100 КБ на значение; больше — не кэшируем
+const DISK_WEB = 'https://disk.yandex.ru/client/disk';
+
+// Ссылка на файл в веб-интерфейсе Яндекс Диска: папка файла с открытым просмотром самого файла.
+// 'disk:/ФБ-ПРИНТ/Макеты/ГФ_10165.jpg' → https://disk.yandex.ru/client/disk/ФБ-ПРИНТ/Макеты?idApp=client&dialog=slider&idDialog=%2Fdisk%2F…
+function layoutWebUrl(path) {
+  const relative = diskPath(path).replace(/^disk:\/?/, '');
+  const folder = relative.split('/').slice(0, -1).map(encodeURIComponent).join('/');
+  return `${DISK_WEB}/${folder}?idApp=client&dialog=slider&idDialog=${encodeURIComponent(`/disk/${relative}`)}`;
+}
+
+// Строки вкладки «Артикулы». sheets — [{ company, rows }] (строки листа без двух строк заголовка),
+// files — [{ name, path }] из папки макетов. Макет выбирается тем же правилом, что и при сборке папки заявки.
+// row — номер строки на листе, чтобы найти артикул в таблице.
+function articleLayoutList(sheets, files) {
+  const list = [];
+  sheets.forEach(({ company, rows: sheetRows }) => {
+    sheetRows.forEach((row, index) => {
+      const sku = text(row[2] ?? '');
+      if (!sku) return;
+      const found = resolveLayout(sku, row[LAYOUT_COLUMN - 1], files);
+      list.push({
+        companyId: company.id,
+        row: index + 3,
+        sku,
+        name: text(row[5] ?? ''),
+        size: text(row[3] ?? ''),
+        layout: found.file ? found.file.name : '',
+        path: found.file ? found.file.path : '',
+        url: found.file ? layoutWebUrl(found.file.path) : '',
+        problem: found.problem,
+        candidates: found.candidates
+      });
+    });
+  });
+  return list;
+}
+
+// Ответ на articleLayouts. Только администратору.
+function articleLayoutsReply(role) {
+  if (role !== 'admin') return { error: ADMIN_REQUIRED };
+  const config = layoutsConfig();
+  if (!config.token) return { error: LAYOUTS_NOT_CONFIGURED };
+  try {
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    const files = listLayoutFiles(config.root, config.ordersRoot);
+    const sheets = COMPANIES.map(company => ({ company, rows: rows(spreadsheet, company.sheet, 2) }));
+    return {
+      ok: true,
+      role,
+      companies: COMPANIES.map(({ id, name }) => ({ id, name })),
+      files: files.length,
+      articles: articleLayoutList(sheets, files)
+    };
+  } catch (error) {
+    console.error(error);
+    const reason = error.kind === 'auth' ? LAYOUT_ALERT_TEXT : error.message;
+    return { error: { code: 'ARTICLES_READ_FAILED', message: `Не удалось прочитать артикулы и макеты: ${reason}` } };
+  }
+}
+
+// Путь лежит внутри папки макетов. Так через превью нельзя достать другой файл Диска.
+function insideLayoutsRoot(path, root) {
+  const key = diskPathKey(path);
+  return key.startsWith(`${diskPathKey(root)}/`) && !key.split('/').includes('..');
+}
+
+// Превью отдаёт сам Яндекс: токен уходит только на его адреса.
+function isDiskPreviewUrl(url) {
+  return /^https:\/\/([a-z0-9-]+\.)*(yandex\.ru|yandex\.net)\//.test(String(url || ''));
+}
+
+function previewCacheKey(path) {
+  const key = `preview:${LAYOUT_PREVIEW_SIZE}:${diskPathKey(path)}`;
+  return key.length <= 250 ? key : '';
+}
+
+// Ответ на layoutPreviews: { previews: { путь: 'data:image/…;base64,…' } }.
+// Не больше LAYOUT_PREVIEW_BATCH путей за раз. Путь вне папки макетов или без превью — пустая строка.
+function layoutPreviewsReply(request, role) {
+  if (role !== 'admin') return { error: ADMIN_REQUIRED };
+  const config = layoutsConfig();
+  if (!config.token) return { error: LAYOUTS_NOT_CONFIGURED };
+  const paths = (Array.isArray(request.paths) ? request.paths : [])
+    .map(path => field(path, 500))
+    .filter(Boolean)
+    .slice(0, LAYOUT_PREVIEW_BATCH);
+  try {
+    return { ok: true, previews: layoutPreviews(paths, config.root, config.token) };
+  } catch (error) {
+    console.error(error);
+    const reason = error.kind === 'auth' ? LAYOUT_ALERT_TEXT : error.message;
+    return { error: { code: 'LAYOUT_PREVIEW_FAILED', message: `Не удалось загрузить превью макетов: ${reason}` } };
+  }
+}
+
+// Сначала кэш, потом Диск: один пакет запросов за ссылками на превью, второй — за самими картинками.
+function layoutPreviews(paths, root, token) {
+  const cache = CacheService.getScriptCache();
+  const previews = {};
+  const wanted = [];
+  paths.forEach(path => {
+    if (Object.prototype.hasOwnProperty.call(previews, path)) return;
+    previews[path] = '';
+    if (!insideLayoutsRoot(path, root)) return;
+    const key = previewCacheKey(path);
+    const cached = key ? cache.get(key) : null;
+    if (cached) previews[path] = cached;
+    else wanted.push(path);
+  });
+  if (!wanted.length) return previews;
+
+  const infos = diskFetchAll(wanted.map(path => diskRequestParams('get', '/resources', {
+    path,
+    preview_size: LAYOUT_PREVIEW_SIZE,
+    preview_crop: 'false',
+    fields: 'preview'
+  })));
+  const denied = infos.find(reply => reply.code === 401);
+  if (denied) diskFail(denied, 'Превью макетов');
+  const links = [];
+  infos.forEach((reply, index) => {
+    const url = reply.code === 200 ? String(reply.body.preview || '') : '';
+    if (isDiskPreviewUrl(url)) links.push({ path: wanted[index], url });
+  });
+  if (!links.length) return previews;
+
+  let responses;
+  try {
+    responses = UrlFetchApp.fetchAll(links.map(link => ({
+      url: link.url,
+      headers: { Authorization: `OAuth ${token}` },
+      muteHttpExceptions: true
+    })));
+  } catch (error) {
+    throw DiskError('retry', `Яндекс Диск недоступен: ${error.message}`);
+  }
+  responses.forEach((response, index) => {
+    if (response.getResponseCode() !== 200) return;
+    const blob = response.getBlob();
+    const type = String(blob.getContentType() || '').split(';')[0].trim();
+    if (!/^image\//.test(type)) return;
+    const dataUrl = `data:${type};base64,${Utilities.base64Encode(blob.getBytes())}`;
+    const path = links[index].path;
+    previews[path] = dataUrl;
+    const key = previewCacheKey(path);
+    if (key && dataUrl.length <= LAYOUT_PREVIEW_CACHE_MAX) {
+      try {
+        cache.put(key, dataUrl, LAYOUT_PREVIEW_CACHE_S);
+      } catch (error) {
+        console.warn(`Превью ${path} не попало в кэш: ${error.message}`);
+      }
+    }
+  });
+  return previews;
 }
 
 // ───── Меню таблицы ─────

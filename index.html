@@ -23,6 +23,7 @@
     <nav class="view-tabs" aria-label="Разделы">
       <a href="#calc" data-view="calc" aria-current="page">Расчёт</a>
       <a href="#orders" data-view="orders">Заявки <span class="tab-count" id="orders-count" hidden></span></a>
+      <a href="#articles" data-view="articles" id="articles-tab" hidden>Артикулы</a>
     </nav>
     <div class="header-meta" data-state="demo" aria-busy="false">
       <span class="admin-badge" id="admin-badge" hidden>Администратор</span>
@@ -278,6 +279,28 @@
       <a class="primary-button" href="#calc">Перейти к расчёту</a>
     </div>
     <ol class="sent-orders" id="sent-orders-list"></ol>
+  </main>
+
+  <!-- Вкладка «Артикулы», только для администратора: артикулы обеих компаний и их макеты на Яндекс Диске. -->
+  <main class="orders-view articles-view" id="articles-view" aria-labelledby="articles-title" hidden>
+    <div class="orders-head">
+      <h1 id="articles-title" tabindex="-1">Артикулы</h1>
+      <p>Артикулы обеих компаний и их макеты на Яндекс Диске. Макет выбирается так же, как при сборке папки заявки.</p>
+    </div>
+    <div class="articles-toolbar" id="articles-toolbar" hidden>
+      <div class="orders-filter" id="articles-company" role="group" aria-label="Компания"></div>
+      <div class="orders-filter articles-missing-wrap">
+        <button type="button" id="articles-missing" aria-pressed="false">Без макета <span id="articles-missing-count"></span></button>
+      </div>
+      <div class="search-field articles-search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
+        <input type="search" id="articles-search" placeholder="Артикул, название или файл" aria-label="Найти артикул" autocomplete="off">
+      </div>
+    </div>
+    <p class="orders-sync articles-sync" aria-live="polite"><span id="articles-sync"></span><span id="articles-shown"></span></p>
+    <p class="orders-admin-alert" id="articles-error" role="alert" hidden></p>
+    <p class="orders-none" id="articles-none" hidden></p>
+    <ul class="article-cards" id="article-cards"></ul>
   </main>
 
   <dialog id="login-dialog">

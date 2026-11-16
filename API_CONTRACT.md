@@ -20,7 +20,7 @@ Content-Type: text/plain;charset=UTF-8
 ## Роли
 
 - `client` — пароль `ACCESS_PASSWORD`. Всё, что было до ролей: каталог, заявки, список заявок.
-- `admin` — пароль `ADMIN_PASSWORD`. То же, что у клиента, плюс папки макетов в списке заявок, `deleteOrder` и `rebuildLayouts`.
+- `admin` — пароль `ADMIN_PASSWORD`. То же, что у клиента, плюс папки макетов в списке заявок, `deleteOrder`, `rebuildLayouts`, `articleLayouts` и `layoutPreviews`.
 - `ADMIN_PASSWORD`, равный `ACCESS_PASSWORD`, админом не делает: с ним входят как клиент. Не задан `ADMIN_PASSWORD` — администратора нет.
 - Ответы `catalog` и `orders` несут `"role": "client" | "admin"`. Сайт роль не хранит, хранит только пароль; скрипт определяет роль по паролю заново на каждом запросе.
 - Действие администратора с паролем клиента получает `ADMIN_REQUIRED`. Это не выход: сайт переключается в роль клиента и не спрашивает пароль снова.
@@ -159,12 +159,14 @@ Apps Script не умеет менять HTTP-статус, поэтому ош�
 | `ACCESS_NOT_CONFIGURED` | в свойствах скрипта не задан ни `ACCESS_PASSWORD`, ни `ADMIN_PASSWORD` |
 | `ADMIN_REQUIRED` | действие администратора с паролем клиента: «Это действие доступно только администратору» |
 | `INVALID_REQUEST` | тело запроса не JSON |
-| `UNKNOWN_ACTION` | `action` не равен `catalog`, `order`, `orders`, `orderLines`, `deleteOrder` или `rebuildLayouts` |
+| `UNKNOWN_ACTION` | `action` не равен `catalog`, `order`, `orders`, `orderLines`, `deleteOrder`, `rebuildLayouts`, `articleLayouts` или `layoutPreviews` |
 | `CATALOG_READ_FAILED` | лист не найден, нет доступа или другая ошибка чтения |
 | `INVALID_ORDER_NUMBER` | `deleteOrder`, `rebuildLayouts`: номер не начинается с `FB-` и цифр |
 | `ORDER_NOT_FOUND` | `deleteOrder`, `rebuildLayouts`: такой заявки нет на листе «Заявки» |
 | `ORDER_DELETE_FAILED` | `deleteOrder`: таблица занята или не записалась |
-| `LAYOUTS_NOT_CONFIGURED` | `rebuildLayouts`: не задан `YANDEX_DISK_TOKEN` |
+| `LAYOUTS_NOT_CONFIGURED` | `rebuildLayouts`, `articleLayouts`, `layoutPreviews`: не задан `YANDEX_DISK_TOKEN` |
+| `ARTICLES_READ_FAILED` | `articleLayouts`: не удалось прочитать листы артикулов или папку макетов |
+| `LAYOUT_PREVIEW_FAILED` | `layoutPreviews`: Яндекс Диск не отдал превью (например, не принял токен) |
 | `LAYOUTS_QUEUE_FAILED` | `rebuildLayouts`: не удалось записать статус на лист |
 
 `message` фронтенд показывает пользователю как есть.
@@ -303,3 +305,43 @@ Content-Type: text/plain;charset=UTF-8
 
 - Заявка снова встаёт в очередь: G — «В очереди», H очищается, ссылка в F остаётся. Файлы в папке копируются заново, поверх старых.
 - Ошибки: `ADMIN_REQUIRED`, `INVALID_ORDER_NUMBER`, `ORDER_NOT_FOUND`, `LAYOUTS_NOT_CONFIGURED` («Сборка макетов не настроена: нет токена Яндекс Диска»), `LAYOUTS_QUEUE_FAILED`.
+
+## Артикулы и макеты
+
+Только администратор. Вкладка «Артикулы» на сайте.
+
+```json
+{ "action": "articleLayouts", "password": "…" }
+```
+
+Успех:
+
+```json
+{
+  "ok": true,
+  "role": "admin",
+  "companies": [{ "id": "global_food", "name": "Глобал Фуд" }, { "id": "studio_vkusa", "name": "Студия Вкуса" }],
+  "files": 400,
+  "articles": [
+    {
+      "companyId": "global_food", "row": 3, "sku": "10165", "name": "ЭТИКЕТКА ГРУДКА КУРИНАЯ…", "size": "80 х 120",
+      "layout": "ГФ_10165_3_80x120.jpg", "path": "disk:/ФБ-ПРИНТ/ГлобалФуд_СтудияВкуса/Актуальные_макеты/ГФ_10165_3_80x120.jpg",
+      "url": "https://disk.yandex.ru/client/disk/…?idApp=client&dialog=slider&idDialog=…", "problem": "", "candidates": []
+    }
+  ]
+}
+```
+
+- Каждая строка листов артикулов с артикулом, в порядке листа. `row` — номер строки на листе.
+- Макет выбирается тем же правилом, что и при сборке папки заявки. `problem`: `''` — макет есть; `missing` — файла нет; `conflict` — файлов несколько, они в `candidates`; `notFound` — в колонке «Макет» имя, которого нет на Диске.
+- `url` открывает файл в веб-интерфейсе Яндекс Диска. Работает только у того, кто вошёл в аккаунт Яндекса, где лежат макеты. Файлы не публикуются.
+
+```json
+{ "action": "layoutPreviews", "password": "…", "paths": ["disk:/ФБ-ПРИНТ/…/ГФ_10165_3_80x120.jpg"] }
+```
+
+Успех: `{ "ok": true, "previews": { "disk:/…/ГФ_10165_3_80x120.jpg": "data:image/jpeg;base64,…" } }`.
+
+- Не больше 12 путей за запрос, лишние отбрасываются.
+- Скрипт берёт у Диска превью около 300 px с токеном и отдаёт его картинкой. Готовое превью 6 часов лежит в кэше скрипта.
+- Путь вне папки макетов или файл без превью — пустая строка.
