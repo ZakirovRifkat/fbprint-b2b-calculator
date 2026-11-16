@@ -68,10 +68,10 @@ export function deleteOutcome(code) {
 }
 
 // Текст тоста при ошибке действия администратора. prefix — «Заявка не удалена», «Сборка не запущена».
-// ADMIN_REQUIRED и коды *_FAILED сервер уже объясняет целиком («Не удалось удалить заявку: …») — без приставки.
+// ADMIN_REQUIRED, коды *_FAILED и ARTICLE_* сервер уже объясняет целиком («Не удалось удалить заявку: …») — без приставки.
 export function adminErrorText(error, prefix) {
   const code = error?.code ?? '';
-  if (error?.reason && (code === 'ADMIN_REQUIRED' || code.endsWith('_FAILED'))) return error.reason;
+  if (error?.reason && (code === 'ADMIN_REQUIRED' || code.endsWith('_FAILED') || code.startsWith('ARTICLE_'))) return error.reason;
   return `${prefix}: ${failureReason(error ?? {})}`;
 }
 
@@ -186,4 +186,4 @@ export function deleteOrderButton(entry, handlers = {}) {
   return button;
 }
 
-const TRASH_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+export const TRASH_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';

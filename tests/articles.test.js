@@ -65,3 +65,18 @@ test('запросы: articleLayouts и layoutPreviews уходят с паро�
   assert.equal(requests[0].password, 'admin-test-pass');
   assert.equal(PREVIEW_BATCH, 12);
 });
+
+test('articleSavePayload: новый артикул — компания из формы; правка — строка, прежний артикул и компания строки', async () => {
+  const { articleSavePayload, sheetSize } = await import('../js/articles.js');
+  const form = { company: 'studio_vkusa', category: '27', sku: ' 30001 ', size: '80 х 120', color: 'Цветная', name: ' ЭТИКЕТКА ', run: '500', layout: '' };
+  assert.deepEqual(articleSavePayload(form), {
+    company: 'studio_vkusa',
+    article: { category: '27', sku: '30001', size: '80 х 120', color: 'Цветная', name: 'ЭТИКЕТКА', layout: '' }
+  });
+  const edited = articleSavePayload({ ...form, company: '' }, { companyId: 'global_food', row: 14, sku: '19743' });
+  assert.equal(edited.company, 'global_food');
+  assert.equal(edited.row, 14);
+  assert.equal(edited.originalSku, '19743');
+  assert.equal(sheetSize('80 × 120'), '80 х 120');
+  assert.equal(sheetSize('40,5×95,6'), '40,5 х 95,6');
+});

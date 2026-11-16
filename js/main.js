@@ -237,7 +237,7 @@ window.addEventListener('hashchange', () => {
   if (location.hash === '#orders') loadOrders();
   if (location.hash === '#articles') loadArticles();
 });
-initArticles();
+initArticles({ onCatalogChange: loadData });
 document.querySelectorAll('#orders-toolbar .orders-filter button').forEach(button => button.addEventListener('click', () => {
   state.ordersFilter = button.dataset.filter;
   renderOrders();

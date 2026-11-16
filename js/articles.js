@@ -3,7 +3,9 @@
 // Превью скачивает Apps Script с токеном и отдаёт картинкой: файлы на Диске не публикуются.
 import { state } from './state.js';
 import { $, plural } from './format.js';
-import { adminErrorText, isAdmin, postAction } from './admin.js';
+import { TRASH_ICON, adminErrorText, isAdmin, postAction } from './admin.js';
+import { confirmAction } from './confirm.js';
+import { toast } from './toast.js';
 
 // Превью за один запрос к Apps Script и сколько таких запросов идёт одновременно.
 export const PREVIEW_BATCH = 12;
@@ -53,6 +55,26 @@ export function articleCounts(list, company = ALL) {
 }
 
 export const articleLayoutsRequest = () => postAction('articleLayouts', {}, 60000);
+export const saveArticleRequest = fields => postAction('saveArticle', fields, 30000);
+export const deleteArticleRequest = fields => postAction('deleteArticle', fields, 30000);
+
+// Поля формы артикула → тело запроса saveArticle. original — артикул, который правят (null — новый).
+export function articleSavePayload(form, original = null) {
+  const article = {};
+  ['category', 'sku', 'size', 'color', 'name', 'layout'].forEach(key => {
+    article[key] = String(form[key] ?? '').trim();
+  });
+  const payload = { company: original?.companyId ?? String(form.company ?? ''), article };
+  if (original) {
+    payload.row = original.row;
+    payload.originalSku = original.sku;
+  }
+  return payload;
+}
+
+// Размер категории в записи листа артикулов: «80 × 120» → «80 х 120».
+export const sheetSize = size => String(size ?? '').replace(/\s*×\s*/g, ' х ');
+
 export const layoutPreviewsRequest = (paths, size) => postAction('layoutPreviews', size ? { paths, size } : { paths }, 60000);
 
 // ───── Загрузка списка ─────
@@ -83,6 +105,7 @@ export async function loadArticles({ force = false } = {}) {
       view.list = Array.isArray(payload.articles) ? payload.articles : [];
       view.companies = Array.isArray(payload.companies) ? payload.companies : [];
       view.files = Number(payload.files) || 0;
+      view.fileNames = Array.isArray(payload.fileNames) ? payload.fileNames : [];
       view.loaded = true;
       view.loadedAt = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
       // Превью могли поменяться на Диске — после обновления списка запрашиваем их заново.
@@ -210,6 +233,20 @@ function articleCard(article) {
     body.append(node('p', 'article-problem', problemText(article)));
   }
   body.append(node('small', 'article-row', `Строка ${article.row} на листе «${companyName(article.companyId)}»`));
+
+  const actions = node('div', 'article-actions');
+  const editButton = node('button', 'text-button', 'Изменить');
+  editButton.type = 'button';
+  editButton.setAttribute('aria-label', `Изменить артикул ${article.sku}`);
+  editButton.addEventListener('click', () => openArticleForm(article));
+  const remove = node('button', 'article-delete');
+  remove.type = 'button';
+  remove.title = 'Удалить артикул';
+  remove.setAttribute('aria-label', `Удалить артикул ${article.sku}`);
+  remove.innerHTML = TRASH_ICON;
+  remove.addEventListener('click', () => deleteArticleWithConfirm(article, remove));
+  actions.append(editButton, remove);
+  body.append(actions);
   card.append(body);
   return card;
 }
@@ -368,10 +405,149 @@ function initViewer() {
   });
 }
 
+// ───── Добавление, изменение и удаление артикула ─────
+// Форма пишет строку прямо в лист компании. После записи список и каталог загружаются заново:
+// так номера строк и макеты на экране всегда совпадают с таблицей.
+let editing = null; // артикул, который правят; null — новый
+
+function fillCategorySelect(selected) {
+  const select = $('#article-category');
+  const options = [new Option('Без категории', '')];
+  (state.data.categories ?? []).forEach(category => {
+    options.push(new Option(`${category.id} · ${category.size} · ${category.color}`, category.id));
+  });
+  // Категория из таблицы, которой нет в каталоге, остаётся видна, чтобы её не потерять молча.
+  if (selected && !options.some(option => option.value === selected)) options.push(new Option(`${selected} · нет на листе «Категории»`, selected));
+  select.replaceChildren(...options);
+  select.value = selected ?? '';
+}
+
+function fillLayoutOptions() {
+  $('#article-layout-options').replaceChildren(...(view.fileNames ?? []).map(name => new Option(name)));
+}
+
+export function openArticleForm(article = null) {
+  editing = article;
+  const form = $('#article-form');
+  form.reset();
+  $('#article-form-title').textContent = article ? `Артикул ${article.sku}` : 'Новый артикул';
+  $('#article-form-error').hidden = true;
+  // Компанию выбирают только у нового артикула. У сохранённого она показана текстом: сменить её нельзя.
+  const companies = $('#article-company');
+  if (article) {
+    companies.replaceChildren(node('span', 'article-company-name', companyName(article.companyId)));
+  } else {
+    companies.replaceChildren(...view.companies.map(company => {
+      const label = node('label', 'article-company-option');
+      const input = node('input');
+      input.type = 'radio';
+      input.name = 'company';
+      input.value = company.id;
+      input.required = true;
+      input.checked = view.filter.company === company.id;
+      label.append(input, node('span', '', company.name));
+      return label;
+    }));
+    if (!companies.querySelector('input:checked')) companies.querySelector('input').checked = true;
+  }
+  fillCategorySelect(article?.category ?? '');
+  fillLayoutOptions();
+  form.elements.sku.value = article?.sku ?? '';
+  form.elements.name.value = article?.name ?? '';
+  form.elements.size.value = article?.size ?? '';
+  form.elements.color.value = article?.color ?? '';
+  // В поле — имя из колонки «Макет», а если она пуста — файл, который нашёлся по артикулу.
+  // После сохранения это имя запишется в колонку, как это делает fillLayoutColumn.
+  form.elements.layout.value = article?.layoutCell || article?.layout || '';
+  setFormBusy(false);
+  $('#article-dialog').showModal();
+  form.elements[article ? 'name' : 'sku'].focus();
+}
+
+function setFormBusy(busy) {
+  const submit = $('#article-submit');
+  submit.disabled = busy;
+  submit.ariaBusy = String(busy);
+  $('#article-submit-label').textContent = busy ? 'Сохраняем…' : 'Сохранить';
+}
+
+function formValues() {
+  const form = $('#article-form');
+  const values = Object.fromEntries(new FormData(form).entries());
+  values.company = form.querySelector('[name=company]:checked')?.value ?? '';
+  return values;
+}
+
+async function submitArticleForm(event) {
+  event.preventDefault();
+  const payload = articleSavePayload(formValues(), editing);
+  const error = $('#article-form-error');
+  error.hidden = true;
+  setFormBusy(true);
+  try {
+    const reply = await saveArticleRequest(payload);
+    $('#article-dialog').close();
+    toast(editing ? `Артикул ${reply.sku} сохранён` : `Артикул ${reply.sku} добавлен в таблицу, строка ${reply.row}`);
+    await refreshAfterChange();
+  } catch (failure) {
+    error.textContent = adminErrorText(failure, 'Артикул не сохранён');
+    error.hidden = false;
+  } finally {
+    setFormBusy(false);
+  }
+}
+
+async function deleteArticleWithConfirm(article, button) {
+  const confirmed = await confirmAction({
+    title: `Удалить артикул ${article.sku}?`,
+    message: `Строка ${article.row} исчезнет с листа «${companyName(article.companyId)}», строки ниже сдвинутся вверх. Отменить нельзя. Макет на Яндекс Диске останется.`,
+    confirmLabel: 'Удалить'
+  });
+  if (!confirmed) return;
+  button.disabled = true;
+  try {
+    await deleteArticleRequest({ company: article.companyId, row: article.row, sku: article.sku });
+    toast(`Артикул ${article.sku} удалён`);
+    await refreshAfterChange();
+  } catch (failure) {
+    button.disabled = false;
+    toast(adminErrorText(failure, 'Артикул не удалён'), { persist: true });
+  }
+}
+
+// После изменения: заново список артикулов и каталог калькулятора.
+async function refreshAfterChange() {
+  await loadArticles({ force: true });
+  refreshCatalog?.();
+}
+
+let refreshCatalog = null;
+
+function initArticleForm(onCatalogChange) {
+  refreshCatalog = onCatalogChange;
+  $('#add-article').addEventListener('click', () => openArticleForm());
+  $('#article-form').addEventListener('submit', submitArticleForm);
+  $('#article-cancel').addEventListener('click', () => $('#article-dialog').close());
+  $('#close-article-dialog').addEventListener('click', () => $('#article-dialog').close());
+  // Категория выбрана, а размер и цветность пусты — подставляем их из категории.
+  $('#article-category').addEventListener('change', event => {
+    const category = (state.data.categories ?? []).find(item => item.id === event.target.value);
+    const form = $('#article-form');
+    if (!category) return;
+    if (!form.elements.size.value.trim()) form.elements.size.value = sheetSize(category.size);
+    if (!form.elements.color.value.trim()) form.elements.color.value = category.color;
+  });
+  // Пока идёт сохранение, Esc окно не закрывает.
+  $('#article-dialog').addEventListener('cancel', event => {
+    if ($('#article-submit').disabled) event.preventDefault();
+  });
+}
+
 // ───── События ─────
 
-export function initArticles() {
+export function initArticles({ onCatalogChange } = {}) {
   initViewer();
+  initArticleForm(onCatalogChange);
   $('#articles-company').addEventListener('click', event => {
     const button = event.target.closest('button[data-company]');
     if (!button) return;
@@ -398,4 +574,5 @@ export function forgetArticles() {
   largePreviews.clear();
   queued.clear();
   if ($('#layout-viewer')?.open) $('#layout-viewer').close();
+  if ($('#article-dialog')?.open) $('#article-dialog').close();
 }

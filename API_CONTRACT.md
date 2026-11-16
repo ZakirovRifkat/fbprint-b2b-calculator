@@ -20,7 +20,7 @@ Content-Type: text/plain;charset=UTF-8
 ## Роли
 
 - `client` — пароль `ACCESS_PASSWORD`. Всё, что было до ролей: каталог, заявки, список заявок.
-- `admin` — пароль `ADMIN_PASSWORD`. То же, что у клиента, плюс папки макетов в списке заявок, `deleteOrder`, `rebuildLayouts`, `articleLayouts` и `layoutPreviews`.
+- `admin` — пароль `ADMIN_PASSWORD`. То же, что у клиента, плюс папки макетов в списке заявок, `deleteOrder`, `rebuildLayouts`, `articleLayouts`, `layoutPreviews`, `saveArticle` и `deleteArticle`.
 - `ADMIN_PASSWORD`, равный `ACCESS_PASSWORD`, админом не делает: с ним входят как клиент. Не задан `ADMIN_PASSWORD` — администратора нет.
 - Ответы `catalog` и `orders` несут `"role": "client" | "admin"`. Сайт роль не хранит, хранит только пароль; скрипт определяет роль по паролю заново на каждом запросе.
 - Действие администратора с паролем клиента получает `ADMIN_REQUIRED`. Это не выход: сайт переключается в роль клиента и не спрашивает пароль снова.
@@ -159,13 +159,17 @@ Apps Script не умеет менять HTTP-статус, поэтому ош�
 | `ACCESS_NOT_CONFIGURED` | в свойствах скрипта не задан ни `ACCESS_PASSWORD`, ни `ADMIN_PASSWORD` |
 | `ADMIN_REQUIRED` | действие администратора с паролем клиента: «Это действие доступно только администратору» |
 | `INVALID_REQUEST` | тело запроса не JSON |
-| `UNKNOWN_ACTION` | `action` не равен `catalog`, `order`, `orders`, `orderLines`, `deleteOrder`, `rebuildLayouts`, `articleLayouts` или `layoutPreviews` |
+| `UNKNOWN_ACTION` | `action` не равен `catalog`, `order`, `orders`, `orderLines`, `deleteOrder`, `rebuildLayouts`, `articleLayouts`, `layoutPreviews`, `saveArticle` или `deleteArticle` |
 | `CATALOG_READ_FAILED` | лист не найден, нет доступа или другая ошибка чтения |
 | `INVALID_ORDER_NUMBER` | `deleteOrder`, `rebuildLayouts`: номер не начинается с `FB-` и цифр |
 | `ORDER_NOT_FOUND` | `deleteOrder`, `rebuildLayouts`: такой заявки нет на листе «Заявки» |
 | `ORDER_DELETE_FAILED` | `deleteOrder`: таблица занята или не записалась |
 | `LAYOUTS_NOT_CONFIGURED` | `rebuildLayouts`, `articleLayouts`, `layoutPreviews`: не задан `YANDEX_DISK_TOKEN` |
 | `ARTICLES_READ_FAILED` | `articleLayouts`: не удалось прочитать листы артикулов или папку макетов |
+| `ARTICLE_INVALID` | `saveArticle`: нет артикула или наименования, пробел или `_` `/` `\` в артикуле, нет такой категории, неизвестная компания |
+| `ARTICLE_DUPLICATE` | `saveArticle`: такой артикул уже есть на листе этой компании |
+| `ARTICLE_CHANGED` | `saveArticle`, `deleteArticle`: в строке уже другой артикул или её нет — таблицу изменили |
+| `ARTICLE_SAVE_FAILED`, `ARTICLE_DELETE_FAILED` | не удалось записать лист или он занят |
 | `LAYOUT_PREVIEW_FAILED` | `layoutPreviews`: Яндекс Диск не отдал превью (например, не принял токен) |
 | `LAYOUTS_QUEUE_FAILED` | `rebuildLayouts`: не удалось записать статус на лист |
 
@@ -346,3 +350,25 @@ Content-Type: text/plain;charset=UTF-8
 - `size`: `M` (около 300 px, по умолчанию) или `XL` (около 800 px, для просмотра крупно). Другое значение — `M`. Ответ называет размер в поле `size`.
 - Скрипт берёт у Диска превью около 300 px с токеном и отдаёт его картинкой. Готовое превью 6 часов лежит в кэше скрипта.
 - Путь вне папки макетов или файл без превью — пустая строка.
+
+## Изменение артикулов
+
+Только администратор. Пишет прямо в лист артикулов компании.
+
+```json
+{ "action": "saveArticle", "password": "…", "company": "global_food",
+  "article": { "category": "27", "sku": "19750", "size": "80 х 120", "color": "Цветная", "name": "ЭТИКЕТКА …", "layout": "" } }
+```
+
+- Без `row` — новая строка в конце листа. С `row` и `originalSku` — замена строки `row` целиком.
+- Строка: A категория, B площадка (`ГФ`/`СВ` по листу), C артикул, D размер, E цветность, F наименование, H макет. Колонку G «Тираж» сайт не правит: при замене строки её значение остаётся, у новой строки она пустая. Категория и артикул из одних цифр пишутся числом.
+- Если в строке `row` уже не `originalSku` — `ARTICLE_CHANGED`, ничего не пишется.
+- Повтор артикула проверяется, только если артикул новый или сменился.
+- Успех: `{ "ok": true, "company": "global_food", "row": 158, "sku": "19750" }`.
+
+```json
+{ "action": "deleteArticle", "password": "…", "company": "global_food", "row": 158, "sku": "19750" }
+```
+
+- Удаляет строку целиком, если в ней этот артикул; иначе `ARTICLE_CHANGED`. Строки ниже сдвигаются вверх. Макет на Диске остаётся.
+- `articleLayouts` для формы отдаёт у каждого артикула ещё `category`, `color`, `layoutCell` (значение колонки H как есть) и общий список имён файлов `fileNames`.

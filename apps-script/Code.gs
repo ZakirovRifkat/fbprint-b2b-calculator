@@ -158,6 +158,8 @@ function doPost(e) {
   if (order.action === 'rebuildLayouts') return json(rebuildLayoutsReply(order, role));
   if (order.action === 'articleLayouts') return json(articleLayoutsReply(role));
   if (order.action === 'layoutPreviews') return json(layoutPreviewsReply(order, role));
+  if (order.action === 'saveArticle') return json(saveArticleReply(order, role));
+  if (order.action === 'deleteArticle') return json(deleteArticleReply(order, role));
   try {
     if (order.action !== 'order') {
       return json({ error: { code: 'UNKNOWN_ACTION', message: 'Неизвестное действие' } });
@@ -1693,6 +1695,9 @@ function articleLayoutList(sheets, files) {
         sku,
         name: text(row[5] ?? ''),
         size: text(row[3] ?? ''),
+        category: text(row[0] ?? ''),
+        color: text(row[4] ?? ''),
+        layoutCell: text(row[LAYOUT_COLUMN - 1] ?? ''),
         layout: found.file ? found.file.name : '',
         path: found.file ? found.file.path : '',
         url: found.file ? layoutWebUrl(found.file.path) : '',
@@ -1718,6 +1723,8 @@ function articleLayoutsReply(role) {
       role,
       companies: COMPANIES.map(({ id, name }) => ({ id, name })),
       files: files.length,
+      // Имена файлов — для подсказки в поле «Макет» формы артикула.
+      fileNames: files.map(file => file.name).sort(),
       articles: articleLayoutList(sheets, files)
     };
   } catch (error) {
@@ -1823,6 +1830,144 @@ function layoutPreviews(paths, root, token, size = LAYOUT_PREVIEW_SIZE) {
     }
   });
   return previews;
+}
+
+// ───── Изменение артикулов администратором ─────
+// Строка листа артикулов: A Категория, B Площадка (ГФ/СВ по листу), C Артикул, D Размер, E Цветность,
+// F Наименование, G Тираж, H Макет. Колонку G сайт не правит: при замене строки её значение сохраняется.
+// Сайт присылает номер строки и артикул, который он в ней видел:
+// если строку тем временем сдвинули или изменили в таблице, запись отклоняется — ничего не перепишется мимо.
+
+const ARTICLE_COLUMNS = 8;
+const ARTICLE_LIMITS = { sku: 30, name: 300, size: 60, color: 60, layout: 200, category: 20 };
+
+function articleError(code, message) {
+  return { error: { code, message } };
+}
+
+// Поля формы → значения строки A–H; G («Тираж») — run, его подставляет вызывающий. Ошибка — { error }.
+// categoryIds — номера из листа «Категории» (строки); пустая категория допустима, как в таблице.
+function articleRowValues(input, company, categoryIds, run = '') {
+  const value = key => field(input && input[key], ARTICLE_LIMITS[key]);
+  const sku = value('sku');
+  const name = value('name');
+  const category = value('category');
+  if (!sku) return articleError('ARTICLE_INVALID', 'Укажите артикул');
+  if (/\s/.test(sku)) return articleError('ARTICLE_INVALID', 'В артикуле не должно быть пробелов');
+  if (/[_/\\]/.test(sku)) return articleError('ARTICLE_INVALID', 'В артикуле нельзя использовать «_», «/» и «\\»: по артикулу ищется файл макета');
+  if (!name) return articleError('ARTICLE_INVALID', 'Укажите наименование');
+  if (category && !categoryIds.includes(category)) return articleError('ARTICLE_INVALID', `Категории ${category} нет на листе «Категории»`);
+  const asNumber = text => (/^\d{1,15}$/.test(text) ? Number(text) : text);
+  return {
+    values: [asNumber(category), company.layoutPrefix, asNumber(sku), value('size'), value('color'), name, run, value('layout')]
+  };
+}
+
+function articleSheetOf(companyId) {
+  const company = COMPANIES.find(item => item.id === companyId);
+  if (!company) return { error: articleError('ARTICLE_INVALID', 'Неизвестная компания').error };
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(company.sheet);
+  if (!sheet) return { error: { code: 'ARTICLE_SAVE_FAILED', message: `Нет листа «${company.sheet}»` } };
+  return { company, sheet };
+}
+
+// Номер строки с артикулом sku (кроме skipRow) или 0. Сравнение без учёта регистра.
+function articleRowWithSku(sheet, sku, skipRow) {
+  const last = sheet.getLastRow();
+  if (last < 3) return 0;
+  const skus = sheet.getRange(3, 3, last - 2, 1).getValues();
+  const wanted = layoutKey(sku);
+  for (let i = 0; i < skus.length; i++) {
+    const row = i + 3;
+    if (row !== skipRow && layoutKey(skus[i][0]) === wanted) return row;
+  }
+  return 0;
+}
+
+// Строка row всё ещё та, что видел сайт: в пределах листа и артикул в C совпадает.
+function articleRowMatches(sheet, row, sku) {
+  if (!Number.isInteger(row) || row < 3 || row > sheet.getLastRow()) return false;
+  return layoutKey(sheet.getRange(row, 3).getValue()) === layoutKey(sku);
+}
+
+const ARTICLE_CHANGED = {
+  code: 'ARTICLE_CHANGED',
+  message: 'Строку артикула уже изменили или сдвинули в таблице. Обновите страницу и попробуйте снова'
+};
+
+// saveArticle: { company, row?, originalSku?, article: { category, sku, size, color, name, run, layout } }.
+// Без row — новая строка в конце листа. С row — замена строки целиком.
+function saveArticleReply(request, role) {
+  if (role !== 'admin') return { error: ADMIN_REQUIRED };
+  const target = articleSheetOf(request.company);
+  if (target.error) return { error: target.error };
+  const { company, sheet } = target;
+  let categoryIds;
+  try {
+    categoryIds = rows(SpreadsheetApp.getActiveSpreadsheet(), 'Категории', 1).map(row => text(row[0])).filter(Boolean);
+  } catch (error) {
+    return articleError('ARTICLE_SAVE_FAILED', `Не удалось прочитать категории: ${error.message}`);
+  }
+  const prepared = articleRowValues(request.article, company, categoryIds);
+  if (prepared.error) return prepared;
+  const sku = text(prepared.values[2]);
+  const editing = request.row !== undefined && request.row !== null && request.row !== '';
+  const row = editing ? Number(request.row) : 0;
+
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+  } catch (error) {
+    return articleError('ARTICLE_SAVE_FAILED', 'Таблица занята другим запросом. Попробуйте через минуту');
+  }
+  try {
+    if (editing && !articleRowMatches(sheet, row, field(request.originalSku, ARTICLE_LIMITS.sku))) return { error: ARTICLE_CHANGED };
+    // Повтор артикула проверяется, только если артикул новый или сменился:
+    // уже существующие дубли в таблице (как 19743) правке строки не мешают.
+    const changedSku = !editing || layoutKey(sku) !== layoutKey(request.originalSku);
+    if (changedSku) {
+      const twin = articleRowWithSku(sheet, sku, row);
+      if (twin) return articleError('ARTICLE_DUPLICATE', `Артикул ${sku} уже есть на листе «${company.sheet}», строка ${twin}`);
+    }
+    const writeRow = editing ? row : Math.max(sheet.getLastRow(), 2) + 1;
+    // «Тираж» (G) сайт не показывает: у правленой строки оставляем как было, у новой — пусто.
+    if (editing) prepared.values[6] = sheet.getRange(row, 7).getValue();
+    sheet.getRange(writeRow, 1, 1, ARTICLE_COLUMNS).setValues([prepared.values]);
+    SpreadsheetApp.flush();
+    return { ok: true, company: company.id, row: writeRow, sku };
+  } catch (error) {
+    console.error(error);
+    return articleError('ARTICLE_SAVE_FAILED', `Не удалось сохранить артикул: ${error.message}`);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// deleteArticle: { company, row, sku }. Строка удаляется целиком, строки ниже сдвигаются вверх.
+function deleteArticleReply(request, role) {
+  if (role !== 'admin') return { error: ADMIN_REQUIRED };
+  const target = articleSheetOf(request.company);
+  if (target.error) return { error: target.error };
+  const { company, sheet } = target;
+  const row = Number(request.row);
+  const sku = field(request.sku, ARTICLE_LIMITS.sku);
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+  } catch (error) {
+    return articleError('ARTICLE_DELETE_FAILED', 'Таблица занята другим запросом. Попробуйте через минуту');
+  }
+  try {
+    if (!sku || !articleRowMatches(sheet, row, sku)) return { error: ARTICLE_CHANGED };
+    sheet.deleteRow(row);
+    SpreadsheetApp.flush();
+    return { ok: true, company: company.id, row, sku };
+  } catch (error) {
+    console.error(error);
+    return articleError('ARTICLE_DELETE_FAILED', `Не удалось удалить артикул: ${error.message}`);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ───── Меню таблицы ─────

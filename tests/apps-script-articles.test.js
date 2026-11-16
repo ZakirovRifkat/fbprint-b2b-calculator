@@ -1,7 +1,7 @@
 // Вкладка «Артикулы» у администратора: articleLayouts и layoutPreviews в поддельном Apps Script.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DISK_ORDERS, DISK_ROOT, TEST_PASSWORDS, loadCodeGs, plain } from './gas-harness.js';
+import { DISK_ORDERS, DISK_ROOT, GF, SV, TEST_PASSWORDS, loadCodeGs, plain } from './gas-harness.js';
 
 const ADMIN = TEST_PASSWORDS.admin;
 const CLIENT = TEST_PASSWORDS.client;
@@ -33,6 +33,9 @@ test('articleLayouts: каждый артикул листа со своим м�
   assert.equal(first.layout, 'ГФ_10165_3_80x120.jpg');
   assert.equal(first.path, path('ГФ_10165_3_80x120.jpg'));
   assert.equal(first.problem, '');
+  assert.equal(first.category, '1');
+  assert.equal(first.layoutCell, '');
+  assert.deepEqual(plain(reply.fileNames), [...LAYOUTS].sort());
   assert.match(first.url, /^https:\/\/disk\.yandex\.ru\/client\/disk\/.+\?idApp=client&dialog=slider&idDialog=%2Fdisk%2F/);
   assert.equal(decodeURIComponent(first.url.split('idDialog=')[1]), `/disk/${path('ГФ_10165_3_80x120.jpg').slice('disk:/'.length)}`);
 
@@ -112,4 +115,67 @@ test('layoutPreviews: токен не принят — ошибка, а не п�
   h.disk.validToken = 'other';
   const reply = h.call({ action: 'layoutPreviews', password: ADMIN, paths: [path('ГФ_10165_3_80x120.jpg')] });
   assert.equal(reply.error.code, 'LAYOUT_PREVIEW_FAILED');
+});
+
+// ───── Изменение артикулов ─────
+
+const article = (over = {}) => ({ category: '1', sku: '30001', size: '80 х 120', color: 'Цветная', name: 'ЭТИКЕТКА НОВАЯ', layout: '', ...over });
+const sheetRow = (h, name, row) => h.sheets[name].data[row - 1];
+
+test('saveArticle: только администратору', () => {
+  const h = loadCodeGs();
+  assert.equal(h.call({ action: 'saveArticle', password: CLIENT, company: 'global_food', article: article() }).error.code, 'ADMIN_REQUIRED');
+  assert.equal(h.call({ action: 'deleteArticle', password: CLIENT, company: 'global_food', row: 3, sku: '10165' }).error.code, 'ADMIN_REQUIRED');
+});
+
+test('saveArticle: новый артикул — строка в конце листа своей компании, с площадкой и числами', () => {
+  const h = loadCodeGs();
+  const before = h.sheets[SV].data.length;
+  const reply = h.call({ action: 'saveArticle', password: ADMIN, company: 'studio_vkusa', article: article({ layout: 'СВ_30001_1.jpg' }) });
+  assert.equal(reply.ok, true);
+  assert.equal(reply.row, before + 1);
+  assert.deepEqual(plain(sheetRow(h, SV, reply.row)), [1, 'СВ', 30001, '80 х 120', 'Цветная', 'ЭТИКЕТКА НОВАЯ', '', 'СВ_30001_1.jpg']);
+  // Каталог сразу видит новый артикул.
+  const catalog = h.call({ action: 'catalog', password: CLIENT });
+  assert.ok(catalog.articles.some(a => a.companyId === 'studio_vkusa' && a.sku === '30001'));
+});
+
+test('saveArticle: проверка полей, категории и повтора артикула', () => {
+  const h = loadCodeGs();
+  const save = over => h.call({ action: 'saveArticle', password: ADMIN, company: 'global_food', article: article(over) }).error;
+  assert.equal(save({ sku: '' }).code, 'ARTICLE_INVALID');
+  assert.equal(save({ sku: '30 001' }).code, 'ARTICLE_INVALID');
+  assert.equal(save({ sku: 'ГФ_30001' }).code, 'ARTICLE_INVALID');
+  assert.equal(save({ name: '  ' }).code, 'ARTICLE_INVALID');
+  assert.match(save({ category: '99' }).message, /Категории 99 нет/);
+  const twin = save({ sku: '10165' });
+  assert.equal(twin.code, 'ARTICLE_DUPLICATE');
+  assert.match(twin.message, /строка 3/);
+  assert.equal(h.call({ action: 'saveArticle', password: ADMIN, company: 'nobody', article: article() }).error.code, 'ARTICLE_INVALID');
+  // У другой компании тот же артикул можно.
+  assert.equal(h.call({ action: 'saveArticle', password: ADMIN, company: 'studio_vkusa', article: article({ sku: '10165' }) }).ok, true);
+});
+
+test('saveArticle: правка строки на месте; сдвинутая строка не перезаписывается', () => {
+  const h = loadCodeGs();
+  sheetRow(h, GF, 4)[6] = 5000; // «Тираж» в G сайт не трогает
+  const reply = h.call({ action: 'saveArticle', password: ADMIN, company: 'global_food', row: 4, originalSku: '10167', article: article({ sku: '10167', name: 'НОВОЕ ИМЯ', category: '', run: '1' }) });
+  assert.equal(reply.ok, true);
+  assert.deepEqual(plain(sheetRow(h, GF, 4)), ['', 'ГФ', 10167, '80 х 120', 'Цветная', 'НОВОЕ ИМЯ', 5000, '']);
+  const stale = h.call({ action: 'saveArticle', password: ADMIN, company: 'global_food', row: 4, originalSku: '10165', article: article() });
+  assert.equal(stale.error.code, 'ARTICLE_CHANGED');
+  // Смена артикула на занятый — отказ; существующий дубль 19743 правке своей строки не мешает.
+  assert.equal(h.call({ action: 'saveArticle', password: ADMIN, company: 'global_food', row: 4, originalSku: '10167', article: article({ sku: '10165' }) }).error.code, 'ARTICLE_DUPLICATE');
+  const rowOf19743 = h.sheets[GF].data.findIndex(r => r[2] === '19743') + 1;
+  assert.equal(h.call({ action: 'saveArticle', password: ADMIN, company: 'global_food', row: rowOf19743, originalSku: '19743', article: article({ sku: '19743' }) }).ok, true);
+});
+
+test('deleteArticle: удаляет строку, только если в ней тот же артикул', () => {
+  const h = loadCodeGs();
+  assert.equal(h.call({ action: 'deleteArticle', password: ADMIN, company: 'global_food', row: 3, sku: '10167' }).error.code, 'ARTICLE_CHANGED');
+  assert.equal(h.call({ action: 'deleteArticle', password: ADMIN, company: 'global_food', row: 99, sku: '10165' }).error.code, 'ARTICLE_CHANGED');
+  const reply = h.call({ action: 'deleteArticle', password: ADMIN, company: 'global_food', row: 3, sku: '10165' });
+  assert.equal(reply.ok, true);
+  assert.equal(sheetRow(h, GF, 3)[2], '10167');
+  assert.ok(!h.sheets[GF].data.some(r => r[2] === '10165'));
 });
