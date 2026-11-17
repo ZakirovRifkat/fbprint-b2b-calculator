@@ -6,7 +6,7 @@ import { categories, demoCatalog, emptyCatalog, normalizeCatalog } from './catal
 import { rememberPassword, setLoginBusy, showPassword } from './auth.js';
 import { apiUrl, applyCatalog, loadData, logout } from './load.js';
 import { addLine, hideSearch, quantity, renderCalculation, renderSearch, renderSelected, setQuantity } from './calculator.js';
-import { clearOrderWithConfirm, orderFilter, readSavedOrder, renderDock, renderOrder, resetOrderFilters } from './order.js';
+import { clearOrderWithConfirm, orderFilter, orderKey, readSavedOrder, renderDock, renderOrder, resetOrderFilters } from './order.js';
 import { addImportedLines, evaluateImportRow, fixable, importFile, renderImport, restoreImportRow } from './import.js';
 import { currentView, loadOrders, renderOrders, showView } from './orders.js';
 import { initArticles, loadArticles } from './articles.js';
@@ -207,6 +207,21 @@ $('#order-form').addEventListener('submit', event => {
   toast('Демо-режим: заявка не отправлена менеджеру.');
 });
 $('#logout').addEventListener('click', logout);
+
+// Заявка общая для всех вкладок сайта: она хранится в браузере. Изменили её в другой вкладке
+// (отправили, очистили, добавили позицию) — эта вкладка показывает то же самое.
+// Иначе отправленная заявка оставалась бы во второй вкладке, и её отправили бы ещё раз.
+window.addEventListener('storage', event => {
+  if (event.key !== orderKey && event.key !== null) return;
+  if (orderSending()) return;
+  const hadLines = state.order.length > 0;
+  state.order = readSavedOrder();
+  renderOrder();
+  if (hadLines && !state.order.length) {
+    if ($('#order-dialog').open) $('#order-dialog').close();
+    toast('Заявку отправили или очистили в другой вкладке.');
+  }
+});
 
 $('#login-form').addEventListener('submit', event => {
   event.preventDefault();
