@@ -31,6 +31,18 @@ function chain() {
 export function makeSheet(name, rows = []) {
   const data = rows.map(row => row.slice());
   const ops = [];
+  // Формулы — отдельно: 'строка,колонка' → '=…'. Значение ячейки в data тесты задают сами.
+  const formulas = new Map();
+  const shiftFormulas = (fromRow, delta) => {
+    const moved = new Map();
+    formulas.forEach((formula, key) => {
+      const [r, c] = key.split(',').map(Number);
+      if (delta < 0 && r === fromRow) return;
+      moved.set(r >= fromRow ? `${r + delta},${c}` : key, formula);
+    });
+    formulas.clear();
+    moved.forEach((formula, key) => formulas.set(key, formula));
+  };
   const width = () => Math.max(0, ...data.map(row => row.length));
   const ensure = (rowCount, colCount) => {
     while (data.length < rowCount) data.push([]);
@@ -69,8 +81,19 @@ export function makeSheet(name, rows = []) {
         ops.push({ op: 'setValues', row, col, values: values.map(line => line.slice()) });
         return r;
       },
+      getFormulas() {
+        return Array.from({ length: numRows }, (_, i) => Array.from({ length: numCols }, (_, j) => formulas.get(`${row + i},${col + j}`) ?? ''));
+      },
+      setFormula(formula) {
+        ensure(row, col);
+        formulas.set(`${row},${col}`, formula);
+        data[row - 1][col - 1] = '';
+        ops.push({ op: 'setFormula', row, col, formula });
+        return r;
+      },
       setValue(value) {
         ensure(row, col);
+        formulas.delete(`${row},${col}`);
         data[row - 1][col - 1] = value;
         ops.push({ op: 'setValues', row, col, values: [[value]] });
         return r;
@@ -111,9 +134,16 @@ export function makeSheet(name, rows = []) {
       if (typeof a === 'string') return a1(a);
       return range(a, b, c ?? 1, d ?? 1);
     },
+    formulas,
     deleteRow(row) {
       ops.push({ op: 'deleteRows', row, count: 1 });
       data.splice(row - 1, 1);
+      shiftFormulas(row, -1);
+    },
+    insertRowAfter(row) {
+      ops.push({ op: 'insertRowAfter', row });
+      data.splice(row, 0, []);
+      shiftFormulas(row + 1, 1);
     },
     deleteRows(row, count) {
       ops.push({ op: 'deleteRows', row, count });

@@ -162,6 +162,9 @@ function doPost(e) {
   if (order.action === 'deleteArticle') return json(deleteArticleReply(order, role));
   if (order.action === 'uploadLayout') return json(uploadLayoutReply(order, role));
   if (order.action === 'setOrderStatus') return json(setOrderStatusReply(order, role));
+  if (order.action === 'categoryRows') return json(categoryRowsReply(role));
+  if (order.action === 'saveCategory') return json(saveCategoryReply(order, role));
+  if (order.action === 'deleteCategory') return json(deleteCategoryReply(order, role));
   try {
     if (order.action !== 'order') {
       return json({ error: { code: 'UNKNOWN_ACTION', message: 'Неизвестное действие' } });
@@ -1874,14 +1877,17 @@ function articleSheetOf(companyId) {
 }
 
 // Номер строки с артикулом sku (кроме skipRow) или 0. Сравнение без учёта регистра.
-function articleRowWithSku(sheet, sku, skipRow) {
+// withCategory — только строки, где заполнена категория (A).
+function articleRowWithSku(sheet, sku, skipRow, withCategory) {
   const last = sheet.getLastRow();
   if (last < 3) return 0;
-  const skus = sheet.getRange(3, 3, last - 2, 1).getValues();
+  const values = sheet.getRange(3, 1, last - 2, 3).getValues();
   const wanted = layoutKey(sku);
-  for (let i = 0; i < skus.length; i++) {
+  for (let i = 0; i < values.length; i++) {
     const row = i + 3;
-    if (row !== skipRow && layoutKey(skus[i][0]) === wanted) return row;
+    if (row === skipRow || layoutKey(values[i][2]) !== wanted) continue;
+    if (withCategory && !text(values[i][0])) continue;
+    return row;
   }
   return 0;
 }
@@ -1930,6 +1936,10 @@ function saveArticleReply(request, role) {
     if (changedSku) {
       const twin = articleRowWithSku(sheet, sku, row);
       if (twin) return articleError('ARTICLE_DUPLICATE', `Артикул ${sku} уже есть на листе «${company.sheet}», строка ${twin}`);
+    } else if (text(prepared.values[0])) {
+      // Старый дубль (как 19743): калькулятор допускает у компании только одну строку артикула с категорией.
+      const twin = articleRowWithSku(sheet, sku, row, true);
+      if (twin) return articleError('ARTICLE_DUPLICATE', `Артикул ${sku} с категорией уже есть на листе «${company.sheet}», строка ${twin}. Без категории эту строку сохранить можно`);
     }
     const writeRow = editing ? row : Math.max(sheet.getLastRow(), 2) + 1;
     // «Тираж» (G) сайт не показывает: у правленой строки оставляем как было, у новой — пусто.
@@ -1967,6 +1977,233 @@ function deleteArticleReply(request, role) {
   } catch (error) {
     console.error(error);
     return articleError('ARTICLE_DELETE_FAILED', `Не удалось удалить артикул: ${error.message}`);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ───── Категории администратором ─────
+// Лист «Категории»: строка 1 — заголовки, строки категорий подряд, под ними примечания (без номера в A).
+// Вводятся руками: A номер, B размер, C цветность, D стоимость, E минимальный тираж, F в роле, G ручьёв,
+// J экстренный заказ. Формулами: H кратность (=F*G, бывает и числом), L срочный (=D*1,5),
+// N «от» / P «до» — подписи, O сниженный тираж от (=F, бывает и числом), Q до (=E-1), R его цена (=D*1,35).
+// Сайт меняет только вводимые ячейки, H и O; L, Q, R остаются формулами таблицы.
+// Новые формулы — без дробей (=D5*3/2): в русской таблице десятичный разделитель — запятая.
+
+const CATEGORY_SHEET = 'Категории';
+const CATEGORY_WIDTH = 18; // A–R
+
+function categorySheet() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CATEGORY_SHEET);
+  if (!sheet) throw new Error(`нет листа «${CATEGORY_SHEET}»`);
+  return sheet;
+}
+
+// Номера строк категорий: подряд от строки 2, пока в A есть номер. Примечания ниже не входят.
+function categoryRowNumbers(sheet) {
+  const last = sheet.getLastRow();
+  if (last < 2) return [];
+  const ids = sheet.getRange(2, 1, last - 1, 1).getValues();
+  const rowsWithId = [];
+  for (let i = 0; i < ids.length; i++) {
+    if (text(ids[i][0])) rowsWithId.push(i + 2);
+  }
+  return rowsWithId;
+}
+
+// Сколько артикулов в каждой категории: Map 'номер' → [«ГФ 10165», …].
+function categoryUsage() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const usage = new Map();
+  COMPANIES.forEach(company => {
+    rows(spreadsheet, company.sheet, 2).forEach(row => {
+      const id = text(row[0] ?? '');
+      const sku = text(row[2] ?? '');
+      if (!id || !sku) return;
+      if (!usage.has(id)) usage.set(id, []);
+      usage.get(id).push(articleLabel(company.layoutPrefix, sku));
+    });
+  });
+  return usage;
+}
+
+// categoryRows: все категории для вкладки «Категории». multipleFormula / reducedFromFormula — ячейка считается формулой.
+function categoryRowsReply(role) {
+  if (role !== 'admin') return { error: ADMIN_REQUIRED };
+  try {
+    const sheet = categorySheet();
+    const numbers = categoryRowNumbers(sheet);
+    const usage = categoryUsage();
+    if (!numbers.length) return { ok: true, categories: [], nextId: 1 };
+    const first = numbers[0];
+    const count = numbers[numbers.length - 1] - first + 1;
+    const values = sheet.getRange(first, 1, count, CATEGORY_WIDTH).getValues();
+    const formulas = sheet.getRange(first, 1, count, CATEGORY_WIDTH).getFormulas();
+    const optional = value => (value === '' || value === null ? null : value);
+    const categories = numbers.map(row => {
+      const v = values[row - first];
+      const f = formulas[row - first];
+      const id = text(v[0]);
+      return {
+        row,
+        id,
+        size: text(v[1]),
+        color: text(v[2]),
+        price: v[3],
+        minimum: v[4],
+        roll: optional(v[5]),
+        lanes: optional(v[6]),
+        multiple: optional(v[7]),
+        multipleFormula: Boolean(f[7]),
+        emergency: v[9],
+        urgent: v[11],
+        reducedFrom: optional(v[14]),
+        reducedFromFormula: Boolean(f[14]),
+        reducedTo: optional(v[16]),
+        reducedPrice: optional(v[17]),
+        articles: (usage.get(id) || []).length
+      };
+    });
+    const nextId = Math.max(0, ...categories.map(item => Number(item.id)).filter(Number.isFinite)) + 1;
+    return { ok: true, categories, nextId };
+  } catch (error) {
+    console.error(error);
+    return articleError('CATEGORIES_READ_FAILED', `Не удалось прочитать категории: ${error.message}`);
+  }
+}
+
+// Число из формы: «1,13» → 1.13, «8 000» → 8000. '' → null. Ошибка — строка с причиной.
+function categoryNumber(value, label, { integer = false, optional = false } = {}) {
+  const raw = String(value === undefined || value === null ? '' : value).trim().replace(/\s/g, '').replace(',', '.');
+  if (!raw) return optional ? { value: null } : { error: `Укажите «${label}»` };
+  const number = Number(raw);
+  if (!/^\d+(\.\d+)?$/.test(raw) || !(number > 0)) return { error: `«${label}» — нужно число больше нуля` };
+  if (integer && !Number.isInteger(number)) return { error: `«${label}» — нужно целое число` };
+  return { value: number };
+}
+
+// Поля формы категории → значения. Правила те же, что у калькулятора при чтении каталога:
+// иначе одна неверная категория сломала бы каталог у всех клиентов.
+function categoryInput(input) {
+  const data = input || {};
+  const size = field(data.size, 60);
+  const color = field(data.color, 60);
+  if (!size) return { error: 'Укажите размер этикетки' };
+  if (!color) return { error: 'Укажите цветность' };
+  const parts = {
+    price: categoryNumber(data.price, 'Стоимость'),
+    emergency: categoryNumber(data.emergency, 'Экстренный заказ'),
+    minimum: categoryNumber(data.minimum, 'Минимальный тираж', { integer: true }),
+    roll: categoryNumber(data.roll, 'Кол-во в роле', { integer: true, optional: true }),
+    lanes: categoryNumber(data.lanes, 'Кол-во ручьёв', { integer: true, optional: true }),
+    multiple: categoryNumber(data.multiple, 'Кратность', { integer: true, optional: true }),
+    reducedFrom: categoryNumber(data.reducedFrom, 'Сниженный тираж от', { integer: true, optional: true })
+  };
+  const failed = Object.keys(parts).find(key => parts[key].error);
+  if (failed) return { error: parts[failed].error };
+  const out = { size, color };
+  Object.keys(parts).forEach(key => { out[key] = parts[key].value; });
+  if (out.multiple === null && (out.roll === null || out.lanes === null)) {
+    return { error: 'Укажите кратность или «в роле» и «ручьёв»: без них кратность не посчитать' };
+  }
+  const from = out.reducedFrom === null ? out.roll : out.reducedFrom;
+  if (from === null) return { error: 'Укажите «Сниженный тираж от» или «в роле»: «от» по умолчанию равно «в роле»' };
+  if (from > out.minimum - 1) {
+    return { error: `Сниженный тираж «от» (${from}) больше, чем «до» (${out.minimum - 1} — минимальный тираж минус один)` };
+  }
+  return { data: out };
+}
+
+// Пишет категорию в строку row. fresh — новая строка: ещё и формулы L, Q, R и подписи N, P.
+function writeCategoryRow(sheet, row, id, data, fresh) {
+  const blank = value => (value === null ? '' : value);
+  sheet.getRange(row, 1, 1, 7).setValues([[Number(id), data.size, data.color, data.price, data.minimum, blank(data.roll), blank(data.lanes)]]);
+  sheet.getRange(row, 10).setValue(data.emergency);
+  if (data.multiple === null) sheet.getRange(row, 8).setFormula(`=F${row}*G${row}`);
+  else sheet.getRange(row, 8).setValue(data.multiple);
+  if (data.reducedFrom === null) sheet.getRange(row, 15).setFormula(`=F${row}`);
+  else sheet.getRange(row, 15).setValue(data.reducedFrom);
+  if (fresh) {
+    sheet.getRange(row, 12).setFormula(`=D${row}*3/2`);
+    sheet.getRange(row, 14).setValue('от');
+    sheet.getRange(row, 16).setValue('до');
+    sheet.getRange(row, 17).setFormula(`=E${row}-1`);
+    sheet.getRange(row, 18).setFormula(`=D${row}*27/20`);
+  }
+}
+
+// saveCategory: { row?, id?, category: { size, color, price, emergency, minimum, roll, lanes, multiple, reducedFrom } }.
+// Без row — новая категория со следующим номером, строкой сразу под последней категорией (над примечаниями).
+// С row и id — правка строки, если в ней по-прежнему эта категория. Номер категории не меняется.
+function saveCategoryReply(request, role) {
+  if (role !== 'admin') return { error: ADMIN_REQUIRED };
+  const parsed = categoryInput(request.category);
+  if (parsed.error) return articleError('CATEGORY_INVALID', parsed.error);
+  const editing = request.row !== undefined && request.row !== null && request.row !== '';
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+  } catch (error) {
+    return articleError('CATEGORY_SAVE_FAILED', 'Таблица занята другим запросом. Попробуйте через минуту');
+  }
+  try {
+    const sheet = categorySheet();
+    const numbers = categoryRowNumbers(sheet);
+    if (editing) {
+      const row = Number(request.row);
+      const id = field(request.id, 20);
+      if (!numbers.includes(row) || text(sheet.getRange(row, 1).getValue()) !== id) {
+        return articleError('CATEGORY_CHANGED', 'Строку категории уже изменили или сдвинули в таблице. Обновите страницу и попробуйте снова');
+      }
+      writeCategoryRow(sheet, row, id, parsed.data, false);
+      SpreadsheetApp.flush();
+      return { ok: true, row, id };
+    }
+    const ids = numbers.map(row => Number(sheet.getRange(row, 1).getValue())).filter(Number.isFinite);
+    const id = String(Math.max(0, ...ids) + 1);
+    const last = numbers.length ? numbers[numbers.length - 1] : 1;
+    sheet.insertRowAfter(last);
+    const row = last + 1;
+    // Оформление (рамки, формат цен) — как у строки выше.
+    if (last > 1) sheet.getRange(last, 1, 1, CATEGORY_WIDTH).copyTo(sheet.getRange(row, 1, 1, CATEGORY_WIDTH), SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false);
+    writeCategoryRow(sheet, row, id, parsed.data, true);
+    SpreadsheetApp.flush();
+    return { ok: true, row, id };
+  } catch (error) {
+    console.error(error);
+    return articleError('CATEGORY_SAVE_FAILED', `Не удалось сохранить категорию: ${error.message}`);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// deleteCategory: { row, id }. Только категорию без артикулов: иначе они пропадут из калькулятора.
+function deleteCategoryReply(request, role) {
+  if (role !== 'admin') return { error: ADMIN_REQUIRED };
+  const row = Number(request.row);
+  const id = field(request.id, 20);
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+  } catch (error) {
+    return articleError('CATEGORY_DELETE_FAILED', 'Таблица занята другим запросом. Попробуйте через минуту');
+  }
+  try {
+    const sheet = categorySheet();
+    if (!categoryRowNumbers(sheet).includes(row) || text(sheet.getRange(row, 1).getValue()) !== id) {
+      return articleError('CATEGORY_CHANGED', 'Строку категории уже изменили или сдвинули в таблице. Обновите страницу и попробуйте снова');
+    }
+    const used = categoryUsage().get(id) || [];
+    if (used.length) {
+      const shown = limitedList(used, 300);
+      return articleError('CATEGORY_IN_USE', `В категории ${id} ${used.length} ${pluralRu(used.length, 'артикул', 'артикула', 'артикулов')}: ${shown}. Сначала перенесите их в другую категорию`);
+    }
+    sheet.deleteRow(row);
+    SpreadsheetApp.flush();
+    return { ok: true, row, id };
+  } catch (error) {
+    console.error(error);
+    return articleError('CATEGORY_DELETE_FAILED', `Не удалось удалить категорию: ${error.message}`);
   } finally {
     lock.releaseLock();
   }

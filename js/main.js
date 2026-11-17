@@ -10,6 +10,7 @@ import { clearOrderWithConfirm, orderFilter, readSavedOrder, renderDock, renderO
 import { addImportedLines, evaluateImportRow, fixable, importFile, renderImport, restoreImportRow } from './import.js';
 import { currentView, loadOrders, renderOrders, showView } from './orders.js';
 import { initArticles, loadArticles } from './articles.js';
+import { initCategories, loadCategories } from './categories.js';
 import { openOrderDialog, orderSending, submitOrder } from './submit.js';
 import { downloadExcel } from './excel.js';
 import { hideToast, restartToastTimer, toast } from './toast.js';
@@ -232,12 +233,14 @@ showView();
 window.addEventListener('hashchange', () => {
   showView();
   window.scrollTo(0, 0);
-  const titles = { calc: '#page-title', orders: '#orders-title', articles: '#articles-title' };
+  const titles = { calc: '#page-title', orders: '#orders-title', articles: '#articles-title', categories: '#categories-title' };
   $(titles[currentView()]).focus({ preventScroll: true });
   if (location.hash === '#orders') loadOrders();
   if (location.hash === '#articles') loadArticles();
+  if (location.hash === '#categories') loadCategories();
 });
 initArticles({ onCatalogChange: loadData });
+initCategories({ onCatalogChange: loadData });
 document.querySelectorAll('#orders-toolbar .orders-filter button').forEach(button => button.addEventListener('click', () => {
   state.ordersFilter = button.dataset.filter;
   renderOrders();

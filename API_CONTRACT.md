@@ -20,7 +20,7 @@ Content-Type: text/plain;charset=UTF-8
 ## Роли
 
 - `client` — пароль `ACCESS_PASSWORD`. Всё, что было до ролей: каталог, заявки, список заявок.
-- `admin` — пароль `ADMIN_PASSWORD`. То же, что у клиента, плюс папки макетов в списке заявок, `deleteOrder`, `rebuildLayouts`, `articleLayouts`, `layoutPreviews`, `saveArticle`, `deleteArticle`, `uploadLayout` и `setOrderStatus`.
+- `admin` — пароль `ADMIN_PASSWORD`. То же, что у клиента, плюс папки макетов в списке заявок, `deleteOrder`, `rebuildLayouts`, `articleLayouts`, `layoutPreviews`, `saveArticle`, `deleteArticle`, `uploadLayout`, `setOrderStatus`, `categoryRows`, `saveCategory` и `deleteCategory`.
 - `ADMIN_PASSWORD`, равный `ACCESS_PASSWORD`, админом не делает: с ним входят как клиент. Не задан `ADMIN_PASSWORD` — администратора нет.
 - Ответы `catalog` и `orders` несут `"role": "client" | "admin"`. Сайт роль не хранит, хранит только пароль; скрипт определяет роль по паролю заново на каждом запросе.
 - Действие администратора с паролем клиента получает `ADMIN_REQUIRED`. Это не выход: сайт переключается в роль клиента и не спрашивает пароль снова.
@@ -159,7 +159,7 @@ Apps Script не умеет менять HTTP-статус, поэтому ош�
 | `ACCESS_NOT_CONFIGURED` | в свойствах скрипта не задан ни `ACCESS_PASSWORD`, ни `ADMIN_PASSWORD` |
 | `ADMIN_REQUIRED` | действие администратора с паролем клиента: «Это действие доступно только администратору» |
 | `INVALID_REQUEST` | тело запроса не JSON |
-| `UNKNOWN_ACTION` | `action` не равен `catalog`, `order`, `orders`, `orderLines`, `deleteOrder`, `rebuildLayouts`, `articleLayouts`, `layoutPreviews`, `saveArticle`, `deleteArticle`, `uploadLayout` или `setOrderStatus` |
+| `UNKNOWN_ACTION` | `action` не равен `catalog`, `order`, `orders`, `orderLines`, `deleteOrder`, `rebuildLayouts`, `articleLayouts`, `layoutPreviews`, `saveArticle`, `deleteArticle`, `uploadLayout`, `setOrderStatus`, `categoryRows`, `saveCategory` или `deleteCategory` |
 | `CATALOG_READ_FAILED` | лист не найден, нет доступа или другая ошибка чтения |
 | `INVALID_ORDER_NUMBER` | `deleteOrder`, `rebuildLayouts`: номер не начинается с `FB-` и цифр |
 | `ORDER_NOT_FOUND` | `deleteOrder`, `rebuildLayouts`: такой заявки нет на листе «Заявки» |
@@ -170,6 +170,10 @@ Apps Script не умеет менять HTTP-статус, поэтому ош�
 | `ARTICLE_DUPLICATE` | `saveArticle`: такой артикул уже есть на листе этой компании |
 | `ARTICLE_CHANGED` | `saveArticle`, `deleteArticle`: в строке уже другой артикул или её нет — таблицу изменили |
 | `ARTICLE_SAVE_FAILED`, `ARTICLE_DELETE_FAILED` | не удалось записать лист или он занят |
+| `CATEGORY_INVALID` | `saveCategory`: пустой размер или цветность, цена или тираж не число больше нуля, тираж не целый, нельзя посчитать кратность или «от», «от» больше «до» |
+| `CATEGORY_CHANGED` | `saveCategory`, `deleteCategory`: в строке уже другая категория или её нет |
+| `CATEGORY_IN_USE` | `deleteCategory`: в категории есть артикулы — они названы в сообщении |
+| `CATEGORIES_READ_FAILED`, `CATEGORY_SAVE_FAILED`, `CATEGORY_DELETE_FAILED` | не удалось прочитать или записать лист «Категории» |
 | `LAYOUT_UPLOAD_INVALID` | `uploadLayout`: не JPG/PNG/PDF, пустой файл или больше 20 МБ |
 | `LAYOUT_UPLOAD_FAILED` | `uploadLayout`: Яндекс Диск не принял файл |
 | `ORDER_STATUS_FAILED` | `setOrderStatus`: не удалось записать статус |
@@ -401,3 +405,23 @@ Content-Type: text/plain;charset=UTF-8
 
 - `shipped: true` пишет «Отгружено» в колонку E самой нижней строки с этим номером, `false` — очищает её («В работе»).
 - Успех: `{ "ok": true, "number": "…", "status": "shipped" }` или `"status": ""`. Ошибки: `ADMIN_REQUIRED`, `INVALID_ORDER_NUMBER`, `ORDER_NOT_FOUND`, `ORDER_STATUS_FAILED`.
+
+## Категории
+
+Только администратор. Вкладка «Категории» на сайте.
+
+`{ "action": "categoryRows", "password": "…" }` → `{ "ok": true, "nextId": 40, "categories": [{ "row": 2, "id": "1", "size": "26,6 х 60", "color": "Цветная", "price": 0.5, "minimum": 8000, "roll": 2000, "lanes": 4, "multiple": 8000, "multipleFormula": true, "emergency": 1, "urgent": 0.75, "reducedFrom": 2000, "reducedFromFormula": true, "reducedTo": 7999, "reducedPrice": 0.675, "articles": 3 }] }`.
+
+```json
+{ "action": "saveCategory", "password": "…", "row": 28, "id": "27",
+  "category": { "size": "80 х 120", "color": "Цветная", "price": "2,10", "emergency": "4,20", "minimum": "3000", "roll": "500", "lanes": "", "multiple": "5000", "reducedFrom": "" } }
+```
+
+- Лист «Категории»: вводимые ячейки — A номер, B размер, C цветность, D стоимость, E минимальный тираж, F в роле, G ручьёв, J экстренный заказ. Формулами считаются L срочный (`D×1,5`), Q «до» (`E−1`) и R цена сниженного тиража (`D×1,35`) — сайт их не меняет.
+- H кратность и O сниженный тираж «от»: число из формы пишется числом, пустое поле — формулой `=F*G` и `=F`.
+- Без `row` — новая категория с номером `nextId`, строкой сразу под последней категорией (примечания ниже сдвигаются вниз), с оформлением строки выше и формулами L, Q, R. Номер категории не меняется.
+- Правила как у калькулятора: цены и тиражи — числа больше нуля, тиражи целые, «от» не больше «до».
+
+`{ "action": "deleteCategory", "password": "…", "row": 28, "id": "27" }` — удаляет строку, только если в категории нет артикулов (иначе `CATEGORY_IN_USE`).
+
+`saveArticle` не даёт сохранить с категорией вторую строку того же артикула у компании: калькулятор допускает у компании одну строку артикула с категорией.

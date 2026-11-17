@@ -166,8 +166,14 @@ test('saveArticle: правка строки на месте; сдвинутая
   assert.equal(stale.error.code, 'ARTICLE_CHANGED');
   // Смена артикула на занятый — отказ; существующий дубль 19743 правке своей строки не мешает.
   assert.equal(h.call({ action: 'saveArticle', password: ADMIN, company: 'global_food', row: 4, originalSku: '10167', article: article({ sku: '10165' }) }).error.code, 'ARTICLE_DUPLICATE');
-  const rowOf19743 = h.sheets[GF].data.findIndex(r => r[2] === '19743') + 1;
-  assert.equal(h.call({ action: 'saveArticle', password: ADMIN, company: 'global_food', row: rowOf19743, originalSku: '19743', article: article({ sku: '19743' }) }).ok, true);
+  // Старый дубль 19743: строку без категории сохранить можно, вторую строку с категорией — нет (сломала бы каталог).
+  const rows19743 = h.sheets[GF].data.map((r, i) => (r[2] === '19743' ? i + 1 : 0)).filter(Boolean);
+  const save19743 = (row, category) => h.call({ action: 'saveArticle', password: ADMIN, company: 'global_food', row, originalSku: '19743', article: article({ sku: '19743', category }) });
+  assert.equal(save19743(rows19743[1], '').ok, true);
+  assert.equal(save19743(rows19743[0], '1').ok, true);
+  const twin = save19743(rows19743[1], '1').error;
+  assert.equal(twin.code, 'ARTICLE_DUPLICATE');
+  assert.match(twin.message, new RegExp(`строка ${rows19743[0]}`));
 });
 
 test('deleteArticle: удаляет строку, только если в ней тот же артикул', () => {

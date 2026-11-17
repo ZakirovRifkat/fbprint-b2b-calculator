@@ -71,7 +71,7 @@ export function deleteOutcome(code) {
 // ADMIN_REQUIRED, коды *_FAILED и ARTICLE_* сервер уже объясняет целиком («Не удалось удалить заявку: …») — без приставки.
 export function adminErrorText(error, prefix) {
   const code = error?.code ?? '';
-  if (error?.reason && (code === 'ADMIN_REQUIRED' || code.endsWith('_FAILED') || code.startsWith('ARTICLE_') || code.startsWith('LAYOUT_UPLOAD_'))) return error.reason;
+  if (error?.reason && (code === 'ADMIN_REQUIRED' || code.endsWith('_FAILED') || code.startsWith('ARTICLE_') || code.startsWith('LAYOUT_UPLOAD_') || code.startsWith('CATEGORY_'))) return error.reason;
   return `${prefix}: ${failureReason(error ?? {})}`;
 }
 

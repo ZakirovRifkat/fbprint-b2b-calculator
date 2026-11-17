@@ -7,6 +7,7 @@ import { renderDock } from './order.js';
 import { toast } from './toast.js';
 import { confirmAction } from './confirm.js';
 import { forgetArticles, loadArticles } from './articles.js';
+import { forgetCategories, loadCategories } from './categories.js';
 import { LAYOUTS_REFRESH_MS, adminBar, adminErrorText, deleteOrderButton, deleteOrderRequest, setOrderStatusRequest, statusSelect, deleteOutcome, isAdmin, needsLayoutsRefresh, rebuildLayoutsRequest, roleOf } from './admin.js';
 
 // Вкладка «Заявки»: все заявки с листа «Заявки» в таблице, новые сверху.
@@ -108,10 +109,15 @@ function renderAdminChrome() {
   $('#admin-badge').hidden = !admin;
   // Вкладка «Артикулы» — только у администратора. Открыта, а роль клиентская — показываем расчёт.
   $('#articles-tab').hidden = !admin;
-  if (!admin) forgetArticles();
-  if (location.hash === '#articles') {
+  $('#categories-tab').hidden = !admin;
+  if (!admin) {
+    forgetArticles();
+    forgetCategories();
+  }
+  if (location.hash === '#articles' || location.hash === '#categories') {
     showView();
     loadArticles();
+    loadCategories();
   }
   $('#orders-admin-alert').textContent = admin ? state.ordersAlert : '';
   $('#orders-admin-alert').hidden = !admin || !state.ordersAlert;
@@ -395,16 +401,18 @@ export async function loadOrders({ quiet = false } = {}) {
 export function currentView() {
   if (location.hash === '#orders') return 'orders';
   if (location.hash === '#articles' && isAdmin()) return 'articles';
+  if (location.hash === '#categories' && isAdmin()) return 'categories';
   return 'calc';
 }
 
-const VIEW_TITLES = { calc: 'FB-print — Расчёт стоимости', orders: 'FB-print — Заявки', articles: 'FB-print — Артикулы' };
+const VIEW_TITLES = { calc: 'FB-print — Расчёт стоимости', orders: 'FB-print — Заявки', articles: 'FB-print — Артикулы', categories: 'FB-print — Категории' };
 
 export function showView() {
   const view = currentView();
   $('#top').hidden = view !== 'calc';
   $('#orders-view').hidden = view !== 'orders';
   $('#articles-view').hidden = view !== 'articles';
+  $('#categories-view').hidden = view !== 'categories';
   document.querySelectorAll('.view-tabs a').forEach(tab => {
     if (tab.dataset.view === view) tab.setAttribute('aria-current', 'page');
     else tab.removeAttribute('aria-current');

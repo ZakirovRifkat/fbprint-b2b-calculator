@@ -26,6 +26,7 @@
       <a href="#calc" data-view="calc" aria-current="page">Расчёт</a>
       <a href="#orders" data-view="orders">Заявки <span class="tab-count" id="orders-count" hidden></span></a>
       <a href="#articles" data-view="articles" id="articles-tab" hidden>Артикулы</a>
+      <a href="#categories" data-view="categories" id="categories-tab" hidden>Категории</a>
     </nav>
     <div class="header-meta" data-state="demo" aria-busy="false">
       <span class="sync-dot" aria-hidden="true"></span>
@@ -310,6 +311,98 @@
     <ul class="article-cards" id="article-cards"></ul>
     <input class="visually-hidden" id="layout-file" type="file" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" tabindex="-1" aria-hidden="true">
   </main>
+
+  <!-- Вкладка «Категории», только для администратора: лист «Категории» — цены и тиражи. -->
+  <main class="orders-view categories-view" id="categories-view" aria-labelledby="categories-title" hidden>
+    <div class="orders-head articles-head">
+      <div class="articles-title-row">
+        <h1 id="categories-title" tabindex="-1">Категории</h1>
+        <button class="primary-button add-article" id="add-category" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          Добавить категорию
+        </button>
+      </div>
+      <p>Цены и тиражи из листа «Категории». По ним калькулятор считает стоимость артикулов. Новые цены клиенты видят сразу.</p>
+    </div>
+    <p class="orders-admin-alert" id="categories-error" role="alert" hidden></p>
+    <div class="categories-loading" id="categories-loading" role="status" hidden><span class="lines-spinner" aria-hidden="true"></span><span>Загружаем категории…</span></div>
+    <div class="categories-table-wrap" id="categories-table" hidden>
+      <table class="categories-table">
+        <thead>
+          <tr>
+            <th scope="col">№</th>
+            <th scope="col">Этикетка</th>
+            <th scope="col" class="num">Стоимость</th>
+            <th scope="col" class="num">Срочно</th>
+            <th scope="col" class="num">Экстренно</th>
+            <th scope="col" class="num">Мин. тираж</th>
+            <th scope="col" class="num">Кратность</th>
+            <th scope="col">Сниженный тираж</th>
+            <th scope="col" class="num">Артикулов</th>
+            <th scope="col"><span class="visually-hidden">Действия</span></th>
+          </tr>
+        </thead>
+        <tbody id="category-rows"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- Добавление и изменение категории. Срочная цена и сниженный тираж считаются формулами таблицы. -->
+  <dialog id="category-dialog" class="article-dialog" aria-labelledby="category-form-title">
+    <form id="category-form" novalidate>
+      <button class="dialog-close" id="close-category-dialog" type="button" aria-label="Закрыть">×</button>
+      <div class="dialog-step">
+        <h2 id="category-form-title">Новая категория</h2>
+        <div class="article-form-grid">
+          <label class="article-field">Размер этикетки
+            <input name="size" required maxlength="60" autocomplete="off" placeholder="80 х 120">
+          </label>
+          <label class="article-field">Цветность
+            <input name="color" required maxlength="60" autocomplete="off" placeholder="Цветная">
+          </label>
+          <label class="article-field">Стоимость, ₽ за шт.
+            <input name="price" required inputmode="decimal" autocomplete="off" placeholder="1,13">
+            <small>При минимальном тираже и больше</small>
+          </label>
+          <label class="article-field">Экстренный заказ, ₽ за шт.
+            <input name="emergency" required inputmode="decimal" autocomplete="off">
+          </label>
+          <div class="article-field category-derived">Срочный заказ, ₽ за шт.
+            <output id="category-urgent">—</output>
+            <small>Считается в таблице: стоимость × 1,5</small>
+          </div>
+          <label class="article-field">Минимальный тираж
+            <input name="minimum" required inputmode="numeric" autocomplete="off" placeholder="4000">
+          </label>
+          <label class="article-field">Кол-во в роле
+            <input name="roll" inputmode="numeric" autocomplete="off">
+          </label>
+          <label class="article-field">Кол-во ручьёв
+            <input name="lanes" inputmode="numeric" autocomplete="off">
+          </label>
+          <label class="article-field">Кратность
+            <input name="multiple" inputmode="numeric" autocomplete="off">
+            <small id="category-multiple-hint">Пусто — в роле × ручьёв</small>
+          </label>
+          <label class="article-field">Сниженный тираж от
+            <input name="reducedFrom" inputmode="numeric" autocomplete="off">
+            <small id="category-from-hint">Пусто — как «в роле»</small>
+          </label>
+          <div class="article-field category-derived">Сниженный тираж
+            <output id="category-reduced">—</output>
+            <small>«До» — минимальный тираж минус один, цена — стоимость × 1,35. Считается в таблице</small>
+          </div>
+        </div>
+        <p class="dialog-error" id="category-form-error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button class="secondary-button" id="category-cancel" type="button">Отмена</button>
+          <button class="primary-button primary-button--accent login-submit" id="category-submit" type="submit">
+            <span class="button-spinner" aria-hidden="true"></span><span id="category-submit-label">Сохранить</span>
+          </button>
+        </div>
+      </div>
+    </form>
+  </dialog>
 
   <!-- Добавление и изменение артикула. Строка пишется прямо в лист компании. -->
   <dialog id="article-dialog" class="article-dialog" aria-labelledby="article-form-title">

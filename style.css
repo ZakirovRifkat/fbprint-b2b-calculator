@@ -307,6 +307,21 @@ button.article-preview:hover{background:var(--tint)}
 .article-company-option input:focus-visible+span{outline:var(--focus-ring);outline-offset:var(--focus-offset)}
 .article-company-option input:disabled+span{opacity:var(--disabled-opacity)}
 .article-company-option input:disabled:checked+span{opacity:1}
+.categories-loading{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-10) 0;color:var(--muted);justify-content:center}
+.categories-table-wrap{background:var(--white);border:var(--border);border-radius:var(--radius-lg);overflow:hidden}
+.categories-table{width:100%;border-collapse:collapse;font-size:var(--text-sm)}
+.categories-table th,.categories-table td{padding:var(--space-3) var(--space-4);border-bottom:var(--border-soft);text-align:left;vertical-align:middle}
+.categories-table thead th{color:var(--muted);font-weight:var(--weight-medium);font-size:var(--text-xs);background:var(--paper-soft)}
+.categories-table tbody tr:last-child>*{border-bottom:0}
+.categories-table .num,.categories-table td:nth-child(n+3):nth-child(-n+7),.categories-table td:nth-child(9){text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.category-id{font-family:var(--font-display);font-size:var(--text-md);font-variant-numeric:tabular-nums}
+.category-name{display:grid;gap:2px}
+.category-name span,.category-muted{color:var(--muted)}
+.category-price{font-weight:var(--weight-bold)}
+.category-actions{display:flex;align-items:center;justify-content:flex-end;gap:var(--space-2)}
+.category-actions .text-button{min-height:var(--tap);font-size:var(--text-sm)}
+.category-derived{color:var(--ink)}
+.category-derived output{min-height:var(--control-lg);display:flex;align-items:center;padding:0 var(--space-3);border-radius:var(--radius);background:var(--paper-soft);font-weight:var(--weight-bold);font-variant-numeric:tabular-nums}
 .skeleton-line{display:block;height:12px;border-radius:var(--radius-pill);background:var(--tint)}
 .skeleton-line--short{width:40%;height:16px}
 .skeleton-line--mid{width:65%}
@@ -341,6 +356,19 @@ button.article-preview:hover{background:var(--tint)}
 .article-file{align-self:flex-start;color:var(--ink);font-size:var(--text-sm);font-weight:var(--weight-bold);text-underline-offset:4px;overflow-wrap:anywhere}
 .article-problem{margin:0;color:var(--warn);font-size:var(--text-sm);overflow-wrap:anywhere}
 .article-row{color:var(--muted);font-size:var(--text-xs)}
+@media(max-width:900px){
+.categories-table-wrap{background:none;border:0;border-radius:0;overflow:visible}
+.categories-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.categories-table,.categories-table tbody{display:block}
+.categories-table tr{display:grid;grid-template-columns:auto 1fr;gap:var(--space-1) var(--space-4);margin-bottom:var(--space-3);padding:var(--space-4);background:var(--white);border:var(--border);border-radius:var(--radius)}
+.categories-table th,.categories-table td{display:flex;justify-content:space-between;gap:var(--space-3);padding:0;border:0}
+.categories-table td{grid-column:1/-1}
+.categories-table td[data-label]:not([data-label=""])::before{content:attr(data-label);color:var(--muted)}
+.categories-table td:nth-child(2){grid-column:2;grid-row:1}
+.categories-table td:nth-child(2)::before{display:none}
+.categories-table td:last-child{margin-top:var(--space-1);padding-top:var(--space-2);border-top:var(--border-soft)}
+.category-actions{justify-content:space-between;width:100%}
+}
 @media(max-width:720px){
 .article-form-grid{grid-template-columns:1fr}
 .add-article{justify-content:center}
@@ -462,6 +490,11 @@ body[data-dock=true] .toast{bottom:var(--dock-space)}
 @media(max-width:1050px){.site-header{column-gap:var(--space-4)}
 .view-tabs a{padding-inline:var(--space-4)}
 }
+/* Четыре вкладки у администратора: на узком планшете вкладки и логотип ужимаются, чтобы шапка осталась одной строкой. */
+@media(max-width:900px) and (min-width:721px){.view-tabs a{padding-inline:var(--space-3);font-size:var(--text-sm)}
+.brand img{width:76px;height:60px}
+.header-meta{font-size:var(--text-xs)}
+}
 @media(max-width:1050px){.workspace{grid-template-columns:1fr}
 .order-footer{grid-template-columns:minmax(0,1fr) 1fr;grid-template-areas:"total total" "delivery delivery" "excel submit" "note note"}
 .order-note{text-align:center}
@@ -476,7 +509,8 @@ body[data-dock=true] .toast{bottom:var(--dock-space)}
 .header-meta{flex-wrap:wrap;white-space:normal}
 body:has(#admin-badge:not([hidden])) .site-header{padding-top:var(--space-8)}
 .admin-badge{position:absolute}
-.view-tabs a{flex:1 1 0;min-width:0;justify-content:center;padding-inline:var(--space-2)}
+.view-tabs a{flex:1 1 auto;min-width:0;justify-content:center;gap:var(--space-1);padding-inline:var(--space-1);font-size:var(--text-sm)}
+.view-tabs .tab-count{min-width:18px;min-height:18px;line-height:1.125rem;padding:0 var(--space-1)}
 .order-sort-select{display:block;flex:1 1 100%}
 .order-tools select{flex:1 1 calc(50% - var(--space-1))}
 .order-table thead{display:none}
