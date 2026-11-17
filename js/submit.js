@@ -7,12 +7,56 @@ import { apiUrl, failureReason } from './load.js';
 import { orderHasProblems, orderTotal, resetOrderFilters } from './order.js';
 import { loadOrders } from './orders.js';
 import { orderFileBase64 } from './excel.js';
-import { toast } from './toast.js';
+import { hideToast, toast } from './toast.js';
+import { reloadForUpdate, siteOutdated } from './version.js';
 
 // Пока заявка уходит, второй раз её не отправить и окно не закрыть:
 // иначе клиент не увидит ни номера, ни ошибки и отправит заявку заново.
 let sending = false;
 export const orderSending = () => sending;
+
+// Метка попытки отправки. Пока заявка не принята, повторная отправка тех же позиций несёт ту же метку:
+// если первый ответ не дошёл (оборвалась связь, истекло ожидание), а заявка уже у менеджера,
+// сервер вернёт её номер, а не создаст вторую. Метка хранится в браузере — переживает перезагрузку.
+// Позиции поменялись — это другая заявка и новая метка.
+export const orderRequestKey = 'fbprint-order-request';
+
+function newRequestId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+// Копия метки в памяти: без хранилища повтор из этой же вкладки всё равно защищён.
+let lastRequest = null;
+
+export function orderRequestId(lines, storage = globalThis.localStorage) {
+  const signature = JSON.stringify(lines);
+  let saved = null;
+  try {
+    saved = JSON.parse(storage?.getItem(orderRequestKey) ?? 'null');
+  } catch {
+    saved = null;
+  }
+  for (const request of [saved, lastRequest]) {
+    if (request?.signature === signature && typeof request.id === 'string' && request.id) return request.id;
+  }
+  lastRequest = { id: newRequestId(), signature };
+  try {
+    storage?.setItem(orderRequestKey, JSON.stringify(lastRequest));
+  } catch {
+    // Остаётся копия в памяти.
+  }
+  return lastRequest.id;
+}
+
+export function forgetOrderRequest(storage = globalThis.localStorage) {
+  lastRequest = null;
+  try {
+    storage?.removeItem(orderRequestKey);
+  } catch {
+    // Нечего забывать.
+  }
+}
 
 export function openOrderDialog() {
   if (!state.order.length) {
@@ -55,10 +99,20 @@ export async function submitOrder() {
       condition: line.status === 'good' ? '' : conditionLabels[line.status]
     }))
   };
+  payload.requestId = orderRequestId(payload.lines);
 
   button.disabled = true;
   button.textContent = 'Отправляем…';
   $('#close-order-dialog').disabled = true;
+  // Старое уведомление («страница перезагрузилась…») к новой попытке уже не относится.
+  hideToast();
+
+  // Вкладка открыта давно, а сайт с тех пор обновился: заявку отправит уже новая версия.
+  // После перезагрузки заявка восстановится из браузера, клиент проверит её и отправит снова.
+  if (await siteOutdated()) {
+    reloadForUpdate('Сайт обновился, поэтому страница перезагрузилась. Заявка не отправлена и сохранена — проверьте её и отправьте ещё раз.');
+    return;
+  }
   // Та же таблица, что скачивает клиент, — менеджер получит её файлом вместе с заявкой.
   // Без файла заявка всё равно уйдёт: текст сообщения содержит все позиции.
   try {
@@ -90,6 +144,7 @@ export async function submitOrder() {
     const number = String(result.number ?? '');
     // Отправленная заявка очищается сразу, вместе с сохранённой в браузере копией:
     // иначе после перезагрузки она восстановится и уйдёт менеджеру второй раз.
+    forgetOrderRequest();
     state.order = [];
     resetOrderFilters();
     loadOrders();

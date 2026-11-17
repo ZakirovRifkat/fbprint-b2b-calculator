@@ -7,8 +7,35 @@
   <title>FB-print — Расчёт стоимости</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-  <link rel="stylesheet" href="tokens.css">
-  <link rel="stylesheet" href="style.css">
+  <!-- Версии файлов: node tools/stamp-version.mjs. Не правьте руками. -->
+  <meta name="app-version" content="577173d9bd">
+  <link rel="stylesheet" href="tokens.css?v=0d7006fc48">
+  <link rel="stylesheet" href="style.css?v=84d7ec0147">
+  <script type="importmap">
+  {
+    "imports": {
+      "./js/admin.js": "./js/admin.js?v=ac27d7a14a",
+      "./js/articles.js": "./js/articles.js?v=a9c21be0a5",
+      "./js/auth.js": "./js/auth.js?v=642eedc5f7",
+      "./js/calculator.js": "./js/calculator.js?v=07f5331c34",
+      "./js/catalog.js": "./js/catalog.js?v=2f269e5fe8",
+      "./js/categories.js": "./js/categories.js?v=b69afe3fec",
+      "./js/confirm.js": "./js/confirm.js?v=eae6c4b86c",
+      "./js/excel.js": "./js/excel.js?v=75e41824a6",
+      "./js/format.js": "./js/format.js?v=e1c60e5185",
+      "./js/import.js": "./js/import.js?v=cfc2ae589f",
+      "./js/load.js": "./js/load.js?v=b29ca97e3c",
+      "./js/order.js": "./js/order.js?v=43bf628433",
+      "./js/orders.js": "./js/orders.js?v=829c016e62",
+      "./js/pricing.js": "./js/pricing.js?v=8d98cefcd9",
+      "./js/state.js": "./js/state.js?v=bae9cf03f1",
+      "./js/submit.js": "./js/submit.js?v=90b030e5f3",
+      "./js/toast.js": "./js/toast.js?v=61ea1dc139",
+      "./js/version.js": "./js/version.js?v=050adb82fa"
+    }
+  }
+  </script>
+  <!-- /версии файлов -->
 </head>
 <body>
   <!-- Экран загрузки при входе по сохранённому паролю. Виден с первого кадра, чтобы страница без данных не мелькала. -->
@@ -561,7 +588,7 @@
     <button class="toast-action" id="toast-action" type="button" hidden></button>
     <button class="toast-close" id="toast-close" type="button" aria-label="Закрыть уведомление" hidden>×</button>
   </div>
-  <script src="config.js"></script>
-  <script type="module" src="js/main.js"></script>
+  <script src="config.js?v=d8de7b46b9"></script>
+  <script type="module" src="js/main.js?v=117387697d"></script>
 </body>
 </html>

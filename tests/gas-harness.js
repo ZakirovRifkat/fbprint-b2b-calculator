@@ -364,6 +364,8 @@ export function loadCodeGs(options = {}) {
   const disk = makeDisk();
   if (options.layouts) disk.addLayouts(options.layouts);
   const telegram = [];
+  // status ≠ 200 — Telegram не принимает сообщения (для сценариев со сбоем отправки).
+  const telegramState = { status: 200 };
   const fetchLog = [];
   const sleeps = [];
   const logs = { log: [], warn: [], error: [] };
@@ -386,6 +388,7 @@ export function loadCodeGs(options = {}) {
   const telegramHandle = (url, opts) => {
     const method = url.split('/').pop();
     const payload = typeof opts.payload === 'string' ? JSON.parse(opts.payload) : (opts.payload || {});
+    if (telegramState.status !== 200) return resp(telegramState.status, { ok: false });
     telegram.push({ method, chatId: String(payload.chat_id), text: payload.text, caption: payload.caption });
     return resp(200, { ok: true, result: {} });
   };
@@ -461,7 +464,7 @@ export function loadCodeGs(options = {}) {
     },
     LockService: { getScriptLock: () => makeLock('script'), getDocumentLock: () => makeLock('document') },
     CacheService: {
-      getScriptCache: () => ({ get: key => (cache.has(key) ? cache.get(key) : null), put: (key, value) => { cache.set(key, String(value)); } })
+      getScriptCache: () => ({ get: key => (cache.has(key) ? cache.get(key) : null), put: (key, value) => { cache.set(key, String(value)); }, remove: key => { cache.delete(key); } })
     },
     UrlFetchApp: {
       fetch: (url, opts) => route(url, opts),
@@ -509,6 +512,7 @@ export function loadCodeGs(options = {}) {
     props,
     disk,
     telegram,
+    telegramState,
     fetchLog,
     sleeps,
     logs,
@@ -533,11 +537,11 @@ export function loadCodeGs(options = {}) {
       return row ? { url: row[5] ?? '', status: row[6] ?? '', problems: row[7] ?? '' } : null;
     },
     // Отправить заявку клиентом. lines — [[компания, артикул], …].
-    order(lines, password = TEST_PASSWORDS.client) {
+    order(lines, password = TEST_PASSWORDS.client, extra = {}) {
       const items = lines.map(([company, sku]) => ({
         company, sku, name: `Этикетка ${sku}`, quantity: 1000, urgency: 'Стандартный', unitPrice: 2, total: 2000
       }));
-      return harness.call({ action: 'order', password, total: items.length * 2000, lines: items });
+      return harness.call({ action: 'order', password, total: items.length * 2000, lines: items, ...extra });
     },
     runQueue(extra = {}) {
       return plain(ctx.runLayoutQueue({ deadline: Date.now() + 270000, ...extra }));

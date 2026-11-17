@@ -174,13 +174,19 @@ function doPost(e) {
     if (!validOrder(order)) {
       return json({ error: { code: 'INVALID_ORDER', message: 'Заявка заполнена неверно' } });
     }
+    // Повтор той же заявки (ответ не дошёл, клиент нажал «Отправить» снова) — второй заявки нет.
+    const requestId = orderRequestId(order);
+    const earlier = earlierOrderReply(requestId);
+    if (earlier) return json(earlier);
     if (!withinLimit()) {
       return json({ error: { code: 'TOO_MANY_ORDERS', message: 'Слишком много заявок. Попробуйте через несколько минут' } });
     }
     const check = verifyPrices(order);
     // Номер выдаёт скрипт по листу «Заявки» и сразу занимает его строкой — так номера не повторяются.
     // Не записалось на лист — заявка не уходит: клиент увидит ошибку и сможет отправить снова.
-    order.number = reserveOrderRow(order);
+    const reserved = reserveOrderRow(order, requestId);
+    if (reserved.earlier) return json(reserved.earlier);
+    order.number = reserved.number;
     // Позиции — для подробностей заявки на сайте. Не записались — заявка всё равно уходит менеджеру:
     // все позиции есть в сообщении и в Excel.
     try {
@@ -194,8 +200,10 @@ function doPost(e) {
       // Менеджер заявку не получил — убираем её строки, на листах остаются только доставленные заявки.
       removeOrderLines(order.number);
       removeOrderRow(order.number);
+      forgetOrderRequest(requestId);
       throw error;
     }
+    rememberOrderRequest(requestId, order.number, true);
     // Папку макетов собирает фоновый запуск; сбой очереди на ответ клиенту не влияет.
     try {
       queueLayouts(order.number);
@@ -460,21 +468,71 @@ function findChatId() {
 // Номер — самый большой номер на листе плюс один, с датой: «FB-0002 от 09.11.2026».
 // Если удалить последнюю строку, её номер выдастся снова; удаление строк из середины номера не меняет.
 // Блокировка не даёт двум одновременным заявкам получить один номер и одну строку.
-function reserveOrderRow(order) {
+// requestId — метка попытки отправки с сайта. Если такая заявка уже принята, пока ждали блокировку,
+// возвращает { earlier: ответ } и строку не занимает.
+function reserveOrderRow(order, requestId = '') {
   const sheet = ordersSheet();
   const companies = [...new Set(order.lines.map(line => field(line.company, 100)).filter(Boolean))].join(', ');
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
+    const earlier = earlierOrderReply(requestId);
+    if (earlier) return { earlier };
     const last = sheet.getLastRow();
     const numbers = last > 1 ? sheet.getRange(2, 1, last - 1, 1).getValues() : [];
     const max = numbers.reduce((top, [value]) => Math.max(top, Number((String(value).match(/^FB-(\d+)/) || [])[1]) || 0), 0);
     const number = `FB-${String(max + 1).padStart(4, '0')} от ${Utilities.formatDate(new Date(), TIME_ZONE, 'dd.MM.yyyy')}`;
     sheet.getRange(last + 1, 1, 1, 4).setValues([[number, new Date(), cellText(companies), Number(order.total)]]);
     SpreadsheetApp.flush();
-    return number;
+    rememberOrderRequest(requestId, number, false);
+    return { number };
   } finally {
     lock.releaseLock();
+  }
+}
+
+// Защита от двойной отправки. Сайт кладёт в заявку requestId и повторяет его, пока заявка не принята:
+// ответ не дошёл до браузера (оборвалась связь, истекло ожидание), а заявка уже у менеджера,
+// клиент жмёт «Отправить» снова — и получает тот же номер вместо второй заявки.
+// Метка живёт в кэше скрипта 6 часов (дольше CacheService не хранит).
+const ORDER_REQUEST_SECONDS = 6 * 60 * 60;
+const orderRequestKey = requestId => `order-request:${requestId}`;
+
+function orderRequestId(order) {
+  const id = typeof order.requestId === 'string' ? order.requestId.trim() : '';
+  return /^[A-Za-z0-9-]{8,64}$/.test(id) ? id : '';
+}
+
+// Ответ для повторной попытки или null, если заявку с этой меткой ещё не принимали.
+function earlierOrderReply(requestId) {
+  if (!requestId) return null;
+  let saved = null;
+  try {
+    saved = JSON.parse(CacheService.getScriptCache().get(orderRequestKey(requestId)) || 'null');
+  } catch (error) {
+    console.error(`Метка заявки не прочитана: ${error.message}`);
+  }
+  if (!saved || !saved.number) return null;
+  console.log(`Повтор заявки ${saved.number} (requestId ${requestId}): вторая заявка не создана`);
+  if (saved.sent) return { ok: true, number: saved.number, repeated: true };
+  return { error: { code: 'ORDER_IN_PROGRESS', message: `Эта заявка уже отправляется под номером ${saved.number}. Через минуту проверьте вкладку «Заявки»` } };
+}
+
+function rememberOrderRequest(requestId, number, sent) {
+  if (!requestId) return;
+  try {
+    CacheService.getScriptCache().put(orderRequestKey(requestId), JSON.stringify({ number, sent }), ORDER_REQUEST_SECONDS);
+  } catch (error) {
+    console.error(`Метка заявки ${number} не сохранена: ${error.message}`);
+  }
+}
+
+function forgetOrderRequest(requestId) {
+  if (!requestId) return;
+  try {
+    CacheService.getScriptCache().remove(orderRequestKey(requestId));
+  } catch (error) {
+    console.error(`Метка заявки не удалена: ${error.message}`);
   }
 }
 
