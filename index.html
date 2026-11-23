@@ -8,25 +8,25 @@
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
   <!-- Версии файлов: node tools/stamp-version.mjs. Не правьте руками. -->
-  <meta name="app-version" content="ddf1318c8e">
+  <meta name="app-version" content="ce68b943c0">
   <link rel="stylesheet" href="tokens.css?v=0d7006fc48">
-  <link rel="stylesheet" href="style.css?v=84d7ec0147">
+  <link rel="stylesheet" href="style.css?v=826ce39e58">
   <script type="importmap">
   {
     "imports": {
       "./js/admin.js": "./js/admin.js?v=ac27d7a14a",
-      "./js/articles.js": "./js/articles.js?v=a9c21be0a5",
+      "./js/articles.js": "./js/articles.js?v=cbbd69b7da",
       "./js/auth.js": "./js/auth.js?v=642eedc5f7",
       "./js/calculator.js": "./js/calculator.js?v=07f5331c34",
       "./js/catalog.js": "./js/catalog.js?v=2f269e5fe8",
-      "./js/categories.js": "./js/categories.js?v=b69afe3fec",
+      "./js/categories.js": "./js/categories.js?v=7b4139aa07",
       "./js/confirm.js": "./js/confirm.js?v=eae6c4b86c",
       "./js/excel.js": "./js/excel.js?v=75e41824a6",
-      "./js/format.js": "./js/format.js?v=e1c60e5185",
+      "./js/format.js": "./js/format.js?v=1cbee78a2f",
       "./js/import.js": "./js/import.js?v=cfc2ae589f",
       "./js/load.js": "./js/load.js?v=b29ca97e3c",
       "./js/order.js": "./js/order.js?v=43bf628433",
-      "./js/orders.js": "./js/orders.js?v=829c016e62",
+      "./js/orders.js": "./js/orders.js?v=737f0fdd08",
       "./js/pricing.js": "./js/pricing.js?v=8d98cefcd9",
       "./js/state.js": "./js/state.js?v=bae9cf03f1",
       "./js/submit.js": "./js/submit.js?v=90b030e5f3",
@@ -352,7 +352,6 @@
       <p>Цены и тиражи из листа «Категории». По ним калькулятор считает стоимость артикулов. Новые цены клиенты видят сразу.</p>
     </div>
     <p class="orders-admin-alert" id="categories-error" role="alert" hidden></p>
-    <div class="categories-loading" id="categories-loading" role="status" hidden><span class="lines-spinner" aria-hidden="true"></span><span>Загружаем категории…</span></div>
     <div class="categories-table-wrap" id="categories-table" hidden>
       <table class="categories-table">
         <thead>

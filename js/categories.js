@@ -1,7 +1,7 @@
 // Вкладка «Категории» у администратора: категории листа «Категории» — цены, тиражи, кратность.
 // Сайт меняет только то, что на листе вводится руками, и H/O (кратность, сниженный тираж «от»).
 // Срочная цена, «до» и цена сниженного тиража остаются формулами таблицы: здесь они только показаны.
-import { $, money } from './format.js';
+import { $, money, skeletonLine } from './format.js';
 import { adminErrorText, isAdmin, postAction, TRASH_ICON } from './admin.js';
 import { confirmAction } from './confirm.js';
 import { toast } from './toast.js';
@@ -122,10 +122,25 @@ export function renderCategories() {
   $('#categories-view').ariaBusy = String(Boolean(view.loading));
   $('#categories-error').hidden = !view.error;
   $('#categories-error').textContent = view.error;
-  $('#categories-loading').hidden = !view.loading || view.loaded;
-  $('#categories-table').hidden = !view.loaded;
+  // Первая загрузка — серые строки в той же таблице, как заготовки у артикулов и заявок.
+  const waiting = Boolean(view.loading) && !view.loaded;
+  $('#categories-table').hidden = !view.loaded && !waiting;
+  if (waiting) body.replaceChildren(...skeletonRows());
   if (!view.loaded) return;
   body.replaceChildren(...view.list.map(categoryRow));
+}
+
+function skeletonRows(count = 6) {
+  return Array.from({ length: count }, () => {
+    const row = node('tr', 'category-skeleton');
+    row.setAttribute('aria-hidden', 'true');
+    for (let column = 0; column < 10; column += 1) {
+      const td = node('td');
+      if (column < 9) td.append(skeletonLine(column === 1 ? '' : 'short'));
+      row.append(td);
+    }
+    return row;
+  });
 }
 
 function cellWith(label, ...content) {

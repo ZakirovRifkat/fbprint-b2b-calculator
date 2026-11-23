@@ -142,7 +142,7 @@ status: draft
 | Ширина окна артикула и категории | `.article-dialog` | 640px | нет (есть 520, 420, 1120) |
 | Размер просмотра макета | `.layout-viewer` | 1100 × 900 px | нет |
 | Уведомление | `.toast` | max 620px, высота 56px | нет |
-| Кружки загрузки | `.page-loader-spinner`, `.lines-spinner`, `.article-preview-spinner`, `.button-spinner` | 44/28/22 px, рамка 4/3/3/2,5 px | только 18 px = `--icon-sm` |
+| Кружки загрузки | `.page-loader-spinner`, `.article-preview-spinner`, `.button-spinner` | 44/22 px, рамка 4/3/2,5 px | только 18 px = `--icon-sm` |
 | Крестик строки | `.line-remove` | 30px | нет (`--control` 40, `--tap` 44) |
 | Счётчик на вкладке | `.tab-count` | 22px, строка 1,375rem; на телефоне 18px, 1,125rem | нет |
 | Точки статуса | `.sync-dot`, `.layouts-dot` | 8px | нет |

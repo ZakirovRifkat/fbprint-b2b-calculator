@@ -1,6 +1,6 @@
 // Вкладка «Заявки»: список из таблицы, статусы, переключение вкладок.
 import { state } from './state.js';
-import { $, cell, integer, money } from './format.js';
+import { $, cell, integer, money, skeletonLine } from './format.js';
 import { accessErrors, accessPassword } from './auth.js';
 import { apiUrl, loadData } from './load.js';
 import { renderDock } from './order.js';
@@ -93,10 +93,14 @@ export function renderOrders(list = state.ordersList) {
     // Выключенная кнопка («Удаляем…») фокус не принимает — тогда он на заголовке заявки.
     (item?.querySelector(`[data-focus-key="${focusKey}"]:not(:disabled)`) ?? item?.querySelector('.sent-order-head'))?.focus({ preventScroll: true });
   }
+  // Первая загрузка — серые заготовки заявок, как у артикулов и категорий.
+  const waiting = !state.ordersLoaded && Boolean(apiUrl() && accessPassword());
+  $('#orders-view').ariaBusy = String(waiting);
+  if (waiting) root.replaceChildren(...skeletonOrders());
   $('#orders-empty').hidden = !state.ordersLoaded || list.length > 0;
   $('#orders-toolbar').hidden = false;
   $('#orders-toolbar .orders-filter').hidden = !list.length;
-  root.hidden = !shown.length;
+  root.hidden = !shown.length && !waiting;
   $('#orders-none').hidden = !list.length || shown.length > 0;
   $('#orders-none').textContent = state.ordersFilter === 'shipped' ? 'Отгруженных заявок пока нет.' : 'Все заявки отгружены.';
   $('#orders-count').textContent = list.length;
@@ -268,15 +272,18 @@ async function showOrderLines(entry, root) {
   }
   const loading = document.createElement('div');
   loading.className = 'order-lines-loading';
-  loading.setAttribute('role', 'status');
-  loading.innerHTML = '<span class="lines-spinner" aria-hidden="true"></span><span class="visually-hidden">Загружаем позиции</span>';
+  loading.setAttribute('aria-hidden', 'true');
+  loading.append(skeletonLine('short'), skeletonLine(), skeletonLine('mid'));
+  root.ariaBusy = 'true';
   root.replaceChildren(loading);
   try {
     const lines = await fetchOrderLines(entry.number);
     linesCache.set(entry.number, lines);
+    root.ariaBusy = 'false';
     renderOrderLines(lines, root, entry.number);
   } catch (error) {
     console.warn(`Позиции заявки ${entry.number} не загружены:`, error);
+    root.ariaBusy = 'false';
     const retry = cell('button', 'Повторить');
     retry.type = 'button';
     retry.className = 'text-button';
@@ -347,7 +354,7 @@ function linesTable(lines) {
 
 // Список и статусы загружаются при входе, при открытии вкладки и после отправки заявки.
 // Если таблица не ответила, остаётся последний загруженный список с пометкой.
-// quiet — фоновое обновление у администратора: без «Обновляем заявки…» в строке состояния.
+// Пока список обновляется, видна старая строка «Обновлено в …»; при первой загрузке — заготовки.
 export async function loadOrders({ quiet = false } = {}) {
   if (!apiUrl()) {
     state.role = 'client';
@@ -363,7 +370,7 @@ export async function loadOrders({ quiet = false } = {}) {
   const controller = new AbortController();
   state.ordersController = controller;
   const timeout = setTimeout(() => controller.abort(), Number(window.FBPRINT_CONFIG?.requestTimeoutMs) || 10000);
-  if (!quiet) $('#orders-sync').textContent = 'Обновляем заявки…';
+  if (!state.ordersLoaded) renderOrders();
   try {
     const response = await fetch(apiUrl(), {
       method: 'POST',
@@ -398,6 +405,17 @@ export async function loadOrders({ quiet = false } = {}) {
 
 // Вкладки в шапке. Раздел задаёт адрес: #orders — заявки, #articles — артикулы (только администратору),
 // всё остальное — расчёт. Так работают кнопка «Назад» и ссылка на раздел.
+// Серые заготовки заявок: номер, дата и компания, сумма.
+function skeletonOrders(count = 4) {
+  return Array.from({ length: count }, () => {
+    const item = document.createElement('li');
+    item.className = 'sent-order-skeleton';
+    item.setAttribute('aria-hidden', 'true');
+    item.append(skeletonLine('short'), skeletonLine(), skeletonLine('mid'));
+    return item;
+  });
+}
+
 export function currentView() {
   if (location.hash === '#orders') return 'orders';
   if (location.hash === '#articles' && isAdmin()) return 'articles';

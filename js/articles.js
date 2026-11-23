@@ -172,7 +172,7 @@ function renderToolbar(counts) {
 }
 
 function syncText() {
-  if (view.loading) return 'Загружаем артикулы и макеты с Яндекс Диска…';
+  // Пока список грузится, вместо надписи — заготовки карточек.
   if (!view.loaded) return '';
   return `Файлов в папке макетов: ${view.files}. Обновлено в ${view.loadedAt}`;
 }
@@ -213,7 +213,6 @@ function skeletonCards(count = 8) {
     const card = node('li', 'article-card article-skeleton');
     card.setAttribute('aria-hidden', 'true');
     const preview = node('div', 'article-preview');
-    preview.append(node('span', 'article-preview-spinner'));
     const body = node('div', 'article-body');
     body.append(node('span', 'skeleton-line skeleton-line--short'), node('span', 'skeleton-line'), node('span', 'skeleton-line skeleton-line--mid'));
     card.append(preview, body);

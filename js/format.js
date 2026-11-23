@@ -38,6 +38,14 @@ export function fitText(element) {
   }
 }
 
+// Серая полоса заготовки: так все списки показывают, что данные ещё грузятся.
+// size — '' (100 %), 'short' (40 %) или 'mid' (65 %).
+export function skeletonLine(size = '') {
+  const line = document.createElement('span');
+  line.className = size ? `skeleton-line skeleton-line--${size}` : 'skeleton-line';
+  return line;
+}
+
 export function cell(tag, text, name) {
   const node = document.createElement(tag);
   node.textContent = text;
