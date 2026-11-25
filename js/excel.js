@@ -88,8 +88,9 @@ export function addCompanySheet(book, company, lines) {
   totalRow.getCell('unitPrice').alignment = { horizontal: 'right' };
 }
 
-export async function orderFileBase64() {
-  const bytes = new Uint8Array(await (await buildOrderWorkbook()).xlsx.writeBuffer());
+// Книга в base64 — для запроса к серверу. lines — позиции черновика или отправленной заявки.
+export async function orderFileBase64(lines = state.order) {
+  const bytes = new Uint8Array(await (await buildOrderWorkbook(lines)).xlsx.writeBuffer());
   let binary = '';
   for (let start = 0; start < bytes.length; start += 0x8000) {
     binary += String.fromCharCode(...bytes.subarray(start, start + 0x8000));

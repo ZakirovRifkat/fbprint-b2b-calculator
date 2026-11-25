@@ -258,63 +258,118 @@ test('setOrderStatus: «Отгружено» и обратно, только а�
   assert.equal(h.rowOf(sent.number)[4], '');
 });
 
-test('sendCustomerEmail: только администратору, номера проверяются до отправки', () => {
-  const h = loadCodeGs();
-  const sent = h.order([['Глобал Фуд', '10165']]);
-  assert.equal(h.call({ action: 'sendCustomerEmail', password: CLIENT, numbers: [sent.number] }).error.code, 'ADMIN_REQUIRED');
-  assert.equal(h.call({ action: 'sendCustomerEmail', password: ADMIN, numbers: [] }).error.code, 'EMAIL_INVALID');
-  assert.equal(h.call({ action: 'sendCustomerEmail', password: ADMIN, numbers: 'FB-0001' }).error.code, 'EMAIL_INVALID');
-  assert.equal(h.call({ action: 'sendCustomerEmail', password: ADMIN, numbers: ['nope'] }).error.code, 'EMAIL_INVALID');
-  assert.equal(h.call({ action: 'sendCustomerEmail', password: ADMIN, numbers: Array.from({ length: 51 }, (_, i) => `FB-${i}`) }).error.code, 'EMAIL_INVALID');
-  const missing = h.call({ action: 'sendCustomerEmail', password: ADMIN, numbers: [sent.number, 'FB-9999 от 01.01.2026'] });
-  assert.equal(missing.error.code, 'ORDER_NOT_FOUND');
-  assert.match(missing.error.message, /FB-9999 от 01\.01\.2026/);
-  assert.equal(h.mail.length, 0);
-});
+// ───── Письмо заказчику ─────
 
-test('sendCustomerEmail: письмо на info@fb-print.ru со ссылками на папки с листа, в порядке выбора', () => {
+const XLSX = Buffer.from('PK\u0003\u0004 fake xlsx').toString('base64');
+const SHIP = '2026-11-27'; // пятница
+
+// Две заявки одного дня с готовыми папками; в папке первой — 11 файлов, второй — 1.
+function emailSetup() {
   const h = loadCodeGs();
   const first = h.order([['Глобал Фуд', '10165']]);
   const second = h.order([['Студия Вкуса', '15053']]);
-  const firstRow = h.rowOf(first.number);
-  firstRow[5] = 'https://disk.yandex.ru/d/first';
-  h.rowOf(second.number)[5] = '';
-  const reply = h.call({ action: 'sendCustomerEmail', password: ADMIN, numbers: [second.number, first.number, first.number] });
-  assert.equal(reply.ok, true);
-  assert.equal(reply.to, 'info@fb-print.ru');
-  assert.deepEqual(plain(reply.numbers), [second.number, first.number]);
-  assert.equal(h.mail.length, 1);
-  const [letter] = h.mail;
-  assert.equal(letter.to, 'info@fb-print.ru');
-  assert.equal(letter.name, 'FB-print');
-  assert.equal(letter.subject, `Согласование заявок ${second.number.split(' ')[0]}, ${first.number.split(' ')[0]}`);
-  assert.equal(letter.body, [
-    'Прошу согласовать заявки и макеты:',
-    '',
-    `1. ${second.number} — папка макетов ещё не готова`,
-    `2. ${first.number} — https://disk.yandex.ru/d/first`
-  ].join('\n'));
-  assert.match(letter.htmlBody, /<a href="https:\/\/disk\.yandex\.ru\/d\/first">макеты<\/a>/);
-  assert.match(letter.htmlBody, /^<p>Прошу согласовать заявки и макеты:<\/p><ol>/);
+  [[first, 'https://yadi.sk/d/first', 11], [second, 'https://yadi.sk/d/second', 1]].forEach(([sent, url, count]) => {
+    const row = h.rowOf(sent.number);
+    row[5] = url;
+    const folder = `${DISK_ORDERS}/${h.ctx.orderFolderName(sent.number, h.fakes.Utilities.formatDate(row[1], 'Europe/Moscow', 'HH.mm.ss'))}`;
+    h.disk.addDir(folder);
+    for (let i = 1; i <= count; i++) h.disk.addFile(`${folder}/ГФ_${i}.jpg`);
+  });
+  const send = (over = {}) => h.call({
+    action: 'sendCustomerEmail', password: ADMIN, numbers: [first.number, second.number], shipDate: SHIP, greeting: 'Светлана',
+    files: { [first.number]: XLSX, [second.number]: XLSX }, ...over
+  });
+  return { h, first, second, send };
+}
+
+test('orderNumbersPhrase и тема: первый номер с «FB-», остальные цифрами, заявки одного дня вместе', () => {
+  const h = loadCodeGs();
+  const c = h.ctx;
+  const n = (num, date = '24.11.2026') => `FB-${num} от ${date}`;
+  assert.equal(c.orderNumbersPhrase([n('0022')]), 'FB-0022 от 24.11.2026');
+  assert.equal(c.orderNumbersPhrase([n('0022'), n('0023')]), 'FB-0022 и 0023 от 24.11.2026');
+  assert.equal(c.orderNumbersPhrase([n('0022'), n('0023'), n('0024')]), 'FB-0022, 0023 и 0024 от 24.11.2026');
+  assert.equal(c.orderNumbersPhrase([n('0021', '23.11.2026'), n('0022'), n('0023')]), 'FB-0021 от 23.11.2026 и 0022 и 0023 от 24.11.2026');
+  assert.equal(c.customerEmailSubject([n('0022'), n('0023'), n('0024')]), 'Заявки_FB-0022, 0023, 0024_от_24.11.26');
+  assert.equal(c.customerEmailSubject([n('0022')]), 'Заявка_FB-0022_от_24.11.26');
+  assert.equal(c.customerEmailSubject([n('0021', '23.11.2026'), n('0022')]), 'Заявки_FB-0021, 0022_от_23.11.26, 24.11.26');
 });
 
-test('sendCustomerEmail: одна заявка — «заявки» в теме; HTML экранируется; лимит и сбой почты — понятная ошибка', () => {
-  const h = loadCodeGs();
-  const sent = h.order([['Глобал Фуд', '10165']]);
-  h.rowOf(sent.number)[5] = 'https://disk.yandex.ru/d/a?x=1&y="2"';
-  assert.equal(h.call({ action: 'sendCustomerEmail', password: ADMIN, numbers: [sent.number] }).ok, true);
-  assert.equal(h.mail[0].subject, `Согласование заявки ${sent.number.split(' ')[0]}`);
-  assert.match(h.mail[0].htmlBody, /href="https:\/\/disk\.yandex\.ru\/d\/a\?x=1&amp;y=&quot;2&quot;"/);
+test('shipDateText: «27/11 (пятница)», неверная дата — пусто', () => {
+  const c = loadCodeGs().ctx;
+  assert.equal(c.shipDateText('2026-11-27'), '27/11 (пятница)');
+  assert.equal(c.shipDateText('2026-11-30'), '30/11 (понедельник)');
+  assert.equal(c.shipDateText('2026-02-30'), '');
+  assert.equal(c.shipDateText('27.11.2026'), '');
+  assert.equal(c.shipDateText(''), '');
+});
+
+test('sendCustomerEmail: только администратору; номера, дата, обращение и таблицы проверяются до отправки', () => {
+  const { h, first, second, send } = emailSetup();
+  assert.equal(send({ password: CLIENT }).error.code, 'ADMIN_REQUIRED');
+  assert.equal(send({ numbers: [] }).error.code, 'EMAIL_INVALID');
+  assert.equal(send({ numbers: 'FB-0001' }).error.code, 'EMAIL_INVALID');
+  assert.equal(send({ numbers: ['nope'] }).error.code, 'EMAIL_INVALID');
+  assert.equal(send({ numbers: Array.from({ length: 21 }, (_, i) => `FB-${i}`) }).error.code, 'EMAIL_INVALID');
+  assert.equal(send({ shipDate: '' }).error.message, 'Укажите плановую дату отгрузки');
+  assert.equal(send({ shipDate: '2026-13-01' }).error.code, 'EMAIL_INVALID');
+  assert.equal(send({ greeting: '  ' }).error.message, 'Укажите, к кому обращаемся в письме');
+  assert.equal(send({ files: { [first.number]: XLSX } }).error.message, `Не приложилась таблица заявки: ${second.number}`);
+  assert.equal(send({ files: { [first.number]: XLSX, [second.number]: Buffer.from('not zip').toString('base64') } }).error.code, 'EMAIL_INVALID');
+  const missing = send({ numbers: [first.number, 'FB-9999 от 01.01.2026'], files: { [first.number]: XLSX, 'FB-9999 от 01.01.2026': XLSX } });
+  assert.equal(missing.error.code, 'ORDER_NOT_FOUND');
+  assert.match(missing.error.message, /FB-9999 от 01\.01\.2026/);
+  h.rowOf(second.number)[5] = '';
+  assert.equal(send().error.message, `Папка макетов ещё не готова: ${second.number}`);
+  assert.equal(h.mail.length, 0);
+});
+
+test('sendCustomerEmail: письмо по шаблону менеджера, таблицы заявок во вложении, файлы посчитаны в папках', () => {
+  const { h, first, second, send } = emailSetup();
+  const reply = send({ numbers: [first.number, second.number, first.number] });
+  assert.equal(reply.ok, true);
+  assert.equal(reply.to, 'info@fb-print.ru');
+  assert.deepEqual(plain(reply.numbers), [first.number, second.number]);
+  assert.equal(h.mail.length, 1);
+  const [letter] = h.mail;
+  const [a, b] = [first.number, second.number].map(number => h.ctx.orderNumberParts(number));
+  assert.equal(letter.to, 'info@fb-print.ru');
+  assert.equal(letter.name, 'FB-print');
+  assert.equal(letter.subject, `Заявки_${a.short}, ${b.digits}_от_${a.date.slice(0, 6)}${a.date.slice(8)}`);
+  assert.equal(letter.body, [
+    'Светлана,',
+    '',
+    `Получены заявки ${a.short} и ${b.digits} от ${a.date} (во вложении).`,
+    'Заказ подтверждаю. Плановая дата отгрузки 27/11 (пятница).',
+    '',
+    `Макеты к заявке ${first.number}: 11 файлов.`,
+    'https://yadi.sk/d/first',
+    '',
+    `Макеты к заявке ${second.number}: 1 файл.`,
+    'https://yadi.sk/d/second'
+  ].join('\n'));
+  assert.match(letter.htmlBody, /<a href="https:\/\/yadi\.sk\/d\/first">https:\/\/yadi\.sk\/d\/first<\/a>/);
+  assert.deepEqual(plain(letter.attachments.map(file => file.getName())), [`${first.number}.xlsx`, `${second.number}.xlsx`]);
+  assert.equal(letter.attachments[0].getContentType(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+});
+
+test('sendCustomerEmail: папку не посчитать — строка без числа файлов; одна заявка; лимит и сбой почты', () => {
+  const { h, first, send } = emailSetup();
+  h.disk.fail = req => (req.kind === 'list' ? 503 : null);
+  assert.equal(send({ numbers: [first.number], greeting: 'Иван <Петрович>' }).ok, true);
+  const [letter] = h.mail;
+  assert.match(letter.subject, /^Заявка_FB-\d+_от_/);
+  assert.match(letter.body, /^Иван <Петрович>,\n\nПолучена заявка FB-\d+ от [\d.]+ \(во вложении\)\./);
+  assert.match(letter.body, new RegExp(`Макеты к заявке ${first.number}:\nhttps://yadi.sk/d/first$`));
+  assert.match(letter.htmlBody, /^<p>Иван &lt;Петрович&gt;,<\/p>/);
 
   h.mailState.quota = 0;
-  const quota = h.call({ action: 'sendCustomerEmail', password: ADMIN, numbers: [sent.number] });
+  const quota = send();
   assert.equal(quota.error.code, 'EMAIL_SEND_FAILED');
   assert.match(quota.error.message, /лимит писем/);
 
   h.mailState.quota = 10;
   h.mailState.fail = 'Service invoked too many times';
-  const failed = h.call({ action: 'sendCustomerEmail', password: ADMIN, numbers: [sent.number] });
-  assert.equal(failed.error.code, 'EMAIL_SEND_FAILED');
-  assert.equal(failed.error.message, 'Письмо не отправлено: Service invoked too many times');
+  assert.equal(send().error.message, 'Письмо не отправлено: Service invoked too many times');
   assert.equal(h.mail.length, 1);
 });

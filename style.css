@@ -306,6 +306,7 @@ button.article-preview:hover{background:var(--tint)}
 /* Письмо заказчику: список заявок с отметками */
 .email-note{margin:0;color:var(--muted)}
 .email-orders-bar{display:flex;align-items:center;justify-content:space-between;gap:var(--space-4);font-size:var(--text-sm);color:var(--muted)}
+.email-orders-bar .is-over{color:var(--danger)}
 .email-orders-bar .text-button{min-height:var(--tap);padding:0 var(--space-1)}
 .email-orders{list-style:none;margin:0;padding:0;max-height:min(50vh,420px);overflow-y:auto;border:var(--border);border-radius:var(--radius)}
 .email-orders li+li{border-top:var(--border-soft)}

@@ -6,7 +6,7 @@
  * POST {action: 'orderLines', password, number} — позиции одной заявки с листа «Позиции заявок».
  * POST {action: 'deleteOrder', password, number} — удаляет заявку и её позиции (только администратор).
  * POST {action: 'rebuildLayouts', password, number} — заново собирает папку макетов заявки (только администратор).
- * POST {action: 'sendCustomerEmail', password, numbers} — письмо заказчику со ссылками на папки макетов (только администратор).
+ * POST {action: 'sendCustomerEmail', password, numbers, shipDate, greeting, files} — письмо заказчику с таблицами заявок и ссылками на макеты (только администратор).
  * Без верного пароля не отдаёт ничего. Расчёт — в js/pricing.js.
  * Пишет только на листы «Заявки» и «Позиции заявок»; на листах артикулов — только колонку H «Макет»
  * и только функциями setupLayoutColumn и fillLayoutColumn, которые запускают в редакторе.
@@ -383,15 +383,7 @@ function withinLimit() {
 // Принимаем только настоящий .xlsx (zip, начинается с «PK») до 500 КБ; имя файла задаём сами.
 // Возвращает Blob или null — без файла заявка всё равно отправляется.
 function orderFile(order) {
-  if (typeof order.file !== 'string' || !order.file || order.file.length > 700000) return null;
-  try {
-    const bytes = Utilities.base64Decode(order.file);
-    if (bytes.length > 500000 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) return null;
-    return Utilities.newBlob(bytes, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', `${order.number}.xlsx`);
-  } catch (error) {
-    console.error(`Файл заявки не прочитан: ${error.message}`);
-    return null;
-  }
+  return xlsxBlob(order.file, `${order.number}.xlsx`);
 }
 
 // Сообщение уходит в каждый чат, следом — файл заявки, если он есть.
@@ -2303,31 +2295,106 @@ function setOrderStatusReply(request, role) {
 
 // Пока письмо уходит только сюда. Тот же адрес назван в окне на сайте (js/customer-email.js).
 const CUSTOMER_EMAIL_TO = 'info@fb-print.ru';
-const CUSTOMER_EMAIL_MAX = 50;
-const CUSTOMER_EMAIL_INTRO = 'Прошу согласовать заявки и макеты:';
-const CUSTOMER_EMAIL_NO_FOLDER = 'папка макетов ещё не готова';
+// Таблица каждой заявки едет вложением (до 500 КБ), поэтому заявок в письме не больше 20.
+const CUSTOMER_EMAIL_MAX = 20;
+const WEEKDAYS_RU = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
+const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 function htmlText(value) {
   return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// Письмо из заявок [{ number, url }] в порядке выбора. Ссылка — папка макетов заявки на Яндекс Диске.
-// Без ссылки — пометка, что папка не готова. Тема — короткие номера: «Согласование заявок FB-0045, FB-0044».
-function customerEmail(orders) {
-  const short = orders.map(order => order.number.split(' ')[0]);
-  const subject = `Согласование ${orders.length === 1 ? 'заявки' : 'заявок'} ${short.join(', ')}`;
-  const body = [CUSTOMER_EMAIL_INTRO, '']
-    .concat(orders.map((order, index) => `${index + 1}. ${order.number} — ${order.url || CUSTOMER_EMAIL_NO_FOLDER}`))
-    .join('\n');
-  const items = orders.map(order => `<li>${htmlText(order.number)} — ${order.url
-    ? `<a href="${htmlText(order.url)}">макеты</a>`
-    : htmlText(CUSTOMER_EMAIL_NO_FOLDER)}</li>`).join('');
-  const htmlBody = `<p>${htmlText(CUSTOMER_EMAIL_INTRO)}</p><ol>${items}</ol>`;
-  return { subject, body, htmlBody };
+// «а», «а и б», «а, б и в».
+function joinRu(items) {
+  if (items.length < 2) return items.join('');
+  return `${items.slice(0, -1).join(', ')} и ${items[items.length - 1]}`;
 }
 
-// sendCustomerEmail: { numbers: ['FB-0045 от 10.11.2026', …] }. Только администратору.
-// Ссылки на папки берутся с листа «Заявки» (колонка F), а не из запроса.
+// «FB-0022 от 24.11.2026» → { short: 'FB-0022', digits: '0022', date: '24.11.2026' }.
+function orderNumberParts(number) {
+  const match = String(number).match(/^FB-(\d+)(?:\s+от\s+(\d{2}\.\d{2}\.\d{4}))?/);
+  return { short: `FB-${match[1]}`, digits: match[1], date: match[2] || '' };
+}
+
+// Номера подряд, как пишет менеджер: первый с «FB-», остальные — только цифры; заявки одного дня — вместе.
+// [FB-0022, FB-0023, FB-0024 от 24.11.2026] → «FB-0022, 0023 и 0024 от 24.11.2026».
+// Разные дни: «FB-0021 от 23.11.2026 и 0022 от 24.11.2026».
+function orderNumbersPhrase(numbers) {
+  const groups = [];
+  numbers.forEach((number, index) => {
+    const parts = orderNumberParts(number);
+    const label = index === 0 ? parts.short : parts.digits;
+    const last = groups[groups.length - 1];
+    if (last && last.date === parts.date) last.labels.push(label);
+    else groups.push({ date: parts.date, labels: [label] });
+  });
+  return joinRu(groups.map(group => `${joinRu(group.labels)}${group.date ? ` от ${group.date}` : ''}`));
+}
+
+// Тема: «Заявки_FB-0022, 0023, 0024_от_24.11.26»; одна заявка — «Заявка_FB-0022_от_24.11.26».
+function customerEmailSubject(numbers) {
+  const parts = numbers.map(orderNumberParts);
+  const list = parts.map((item, index) => (index === 0 ? item.short : item.digits)).join(', ');
+  const dates = [...new Set(parts.map(item => item.date).filter(Boolean))].map(date => `${date.slice(0, 6)}${date.slice(8)}`);
+  return `${numbers.length === 1 ? 'Заявка' : 'Заявки'}_${list}${dates.length ? `_от_${dates.join(', ')}` : ''}`;
+}
+
+// '2026-11-27' → '27/11 (пятница)'; неверная дата — ''.
+function shipDateText(value) {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return '';
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (date.getUTCFullYear() !== Number(match[1]) || date.getUTCMonth() !== Number(match[2]) - 1 || date.getUTCDate() !== Number(match[3])) return '';
+  return `${match[3]}/${match[2]} (${WEEKDAYS_RU[date.getUTCDay()]})`;
+}
+
+// Письмо из заявок [{ number, url, files }] в порядке выбора. files — число файлов в папке или null (не посчитали).
+function customerEmail(orders, shipDate, greeting) {
+  const numbers = orders.map(order => order.number);
+  const many = orders.length > 1;
+  const head = `${many ? 'Получены заявки' : 'Получена заявка'} ${orderNumbersPhrase(numbers)} (во вложении).`;
+  const confirm = `Заказ подтверждаю. Плановая дата отгрузки ${shipDateText(shipDate)}.`;
+  const layoutsHead = order => `Макеты к заявке ${order.number}${order.files === null
+    ? ':'
+    : `: ${order.files} ${pluralRu(order.files, 'файл', 'файла', 'файлов')}.`}`;
+  const body = [`${greeting},`, '', head, confirm]
+    .concat(...orders.map(order => ['', layoutsHead(order), order.url]))
+    .join('\n');
+  const htmlBody = [`<p>${htmlText(greeting)},</p>`, `<p>${htmlText(head)}<br>${htmlText(confirm)}</p>`]
+    .concat(orders.map(order => `<p>${htmlText(layoutsHead(order))}<br><a href="${htmlText(order.url)}">${htmlText(order.url)}</a></p>`))
+    .join('');
+  return { subject: customerEmailSubject(numbers), body, htmlBody };
+}
+
+// Настоящий .xlsx (zip, начинается с «PK») до 500 КБ в base64 → Blob с именем name; иначе null.
+function xlsxBlob(base64, name) {
+  if (typeof base64 !== 'string' || !base64 || base64.length > 700000) return null;
+  try {
+    const bytes = Utilities.base64Decode(base64);
+    if (bytes.length > 500000 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) return null;
+    return Utilities.newBlob(bytes, XLSX_TYPE, name);
+  } catch (error) {
+    console.error(`Файл ${name} не прочитан: ${error.message}`);
+    return null;
+  }
+}
+
+// Сколько файлов в папке заявки на Диске; не получилось (нет токена, нет папки, Диск не ответил) — null.
+function orderFolderFileCount(number, sentAt) {
+  try {
+    const config = layoutsConfig();
+    if (!config.token || config.error || dateMs(sentAt) === null) return null;
+    const timeText = Utilities.formatDate(sentAt, TIME_ZONE, 'HH.mm.ss');
+    const names = listFolderNames(`${config.ordersRoot}/${orderFolderName(number, timeText)}`);
+    return names.size || null;
+  } catch (error) {
+    console.warn(`Файлы папки заявки ${number} не посчитаны: ${error.message}`);
+    return null;
+  }
+}
+
+// sendCustomerEmail: { numbers, shipDate: 'ГГГГ-ММ-ДД', greeting, files: { номер: base64 .xlsx } }. Только администратору.
+// Ссылки на папки и время заявок берутся с листа «Заявки», число файлов — из папки заявки на Диске.
 function sendCustomerEmailReply(request, role) {
   if (role !== 'admin') return { error: ADMIN_REQUIRED };
   const numbers = Array.isArray(request.numbers)
@@ -2336,15 +2403,23 @@ function sendCustomerEmailReply(request, role) {
   if (!numbers.length || numbers.length > CUSTOMER_EMAIL_MAX || numbers.some(number => !/^FB-\d+/.test(number))) {
     return articleError('EMAIL_INVALID', `Выберите от 1 до ${CUSTOMER_EMAIL_MAX} заявок`);
   }
-  let orders;
+  if (!shipDateText(request.shipDate)) return articleError('EMAIL_INVALID', 'Укажите плановую дату отгрузки');
+  const greeting = field(request.greeting, 60);
+  if (!greeting) return articleError('EMAIL_INVALID', 'Укажите, к кому обращаемся в письме');
+  const files = request.files && typeof request.files === 'object' ? request.files : {};
+  const attachments = numbers.map(number => xlsxBlob(files[number], `${number}.xlsx`));
+  const broken = numbers.filter((number, index) => !attachments[index]);
+  if (broken.length) return articleError('EMAIL_INVALID', `Не приложилась таблица заявки: ${broken.join(', ')}`);
+
+  let rowsFound;
   try {
     const sheet = ordersSheet();
     const last = sheet.getLastRow();
     const values = last < 2 ? [] : sheet.getRange(2, 1, last - 1, 6).getValues();
-    orders = numbers.map(number => {
+    rowsFound = numbers.map(number => {
       // Как у статуса и удаления: самая нижняя строка с этим номером.
       for (let index = values.length - 1; index >= 0; index--) {
-        if (text(values[index][0]) === number) return { number, url: text(values[index][5] ?? '') };
+        if (text(values[index][0]) === number) return { number, sentAt: values[index][1], url: text(values[index][5] ?? '') };
       }
       return null;
     });
@@ -2352,16 +2427,22 @@ function sendCustomerEmailReply(request, role) {
     console.error(error);
     return articleError('EMAIL_SEND_FAILED', `Не удалось прочитать заявки: ${error.message}`);
   }
-  const missing = numbers.filter((number, index) => !orders[index]);
+  const missing = numbers.filter((number, index) => !rowsFound[index]);
   if (missing.length) {
     return { error: { code: 'ORDER_NOT_FOUND', message: `Заявки не найдены — возможно, их уже удалили: ${missing.join(', ')}` } };
   }
+  const noFolder = rowsFound.filter(order => !order.url).map(order => order.number);
+  if (noFolder.length) return articleError('EMAIL_INVALID', `Папка макетов ещё не готова: ${noFolder.join(', ')}`);
+
   try {
     if (MailApp.getRemainingDailyQuota() < 1) {
       return articleError('EMAIL_SEND_FAILED', 'На сегодня лимит писем исчерпан. Попробуйте завтра');
     }
-    const letter = customerEmail(orders);
-    MailApp.sendEmail({ to: CUSTOMER_EMAIL_TO, subject: letter.subject, body: letter.body, htmlBody: letter.htmlBody, name: 'FB-print' });
+    const orders = rowsFound.map(order => ({ number: order.number, url: order.url, files: orderFolderFileCount(order.number, order.sentAt) }));
+    const letter = customerEmail(orders, request.shipDate, greeting);
+    MailApp.sendEmail({
+      to: CUSTOMER_EMAIL_TO, subject: letter.subject, body: letter.body, htmlBody: letter.htmlBody, name: 'FB-print', attachments
+    });
     return { ok: true, to: CUSTOMER_EMAIL_TO, numbers };
   } catch (error) {
     console.error(error);

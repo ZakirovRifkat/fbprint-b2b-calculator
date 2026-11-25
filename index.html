@@ -8,9 +8,9 @@
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
   <!-- Версии файлов: node tools/stamp-version.mjs. Не правьте руками. -->
-  <meta name="app-version" content="96c72f3608">
+  <meta name="app-version" content="e9a6313394">
   <link rel="stylesheet" href="tokens.css?v=deb5f92ab7">
-  <link rel="stylesheet" href="style.css?v=30f87d7eb4">
+  <link rel="stylesheet" href="style.css?v=2024123023">
   <script type="importmap">
   {
     "imports": {
@@ -21,13 +21,13 @@
       "./js/catalog.js": "./js/catalog.js?v=2f269e5fe8",
       "./js/categories.js": "./js/categories.js?v=7b4139aa07",
       "./js/confirm.js": "./js/confirm.js?v=eae6c4b86c",
-      "./js/customer-email.js": "./js/customer-email.js?v=851301f9bd",
-      "./js/excel.js": "./js/excel.js?v=4193e21ba8",
+      "./js/customer-email.js": "./js/customer-email.js?v=23868d8689",
+      "./js/excel.js": "./js/excel.js?v=488623b5df",
       "./js/format.js": "./js/format.js?v=1cbee78a2f",
       "./js/import.js": "./js/import.js?v=cfc2ae589f",
       "./js/load.js": "./js/load.js?v=b29ca97e3c",
       "./js/order.js": "./js/order.js?v=43bf628433",
-      "./js/orders.js": "./js/orders.js?v=94d3284fc0",
+      "./js/orders.js": "./js/orders.js?v=5e8a22a3ad",
       "./js/pricing.js": "./js/pricing.js?v=8d98cefcd9",
       "./js/state.js": "./js/state.js?v=bae9cf03f1",
       "./js/submit.js": "./js/submit.js?v=90b030e5f3",
@@ -558,6 +558,16 @@
       <div class="dialog-step">
         <h2 id="customer-email-title">Письмо заказчику</h2>
         <p class="email-note" id="customer-email-note"></p>
+        <div class="article-form-grid">
+          <label class="article-field">Обращение
+            <input id="customer-email-greeting" maxlength="60" autocomplete="off" required>
+            <small>Первая строка письма: «Светлана,»</small>
+          </label>
+          <label class="article-field">Плановая дата отгрузки
+            <input id="customer-email-ship" type="date" required>
+            <small id="customer-email-ship-text">В письме: «27/11 (пятница)»</small>
+          </label>
+        </div>
         <div class="email-orders-bar">
           <span id="customer-email-count" aria-live="polite"></span>
           <button class="text-button" id="customer-email-all" type="button"></button>

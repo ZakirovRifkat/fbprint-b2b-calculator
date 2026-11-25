@@ -275,6 +275,12 @@ async function fetchOrderLines(number) {
   }
 }
 
+// Позиции заявки: из кэша или с сервера (и в кэш). Для письма заказчику.
+export async function orderLinesFor(number) {
+  if (!linesCache.has(number)) linesCache.set(number, await fetchOrderLines(number));
+  return linesCache.get(number);
+}
+
 async function showOrderLines(entry, root) {
   if (linesCache.has(entry.number)) {
     renderOrderLines(linesCache.get(entry.number), root, entry.number);
