@@ -266,7 +266,10 @@ th[aria-sort=descending] .sort-button::after{content:"↓";opacity:1}
 .sent-order-top{display:flex;align-items:stretch}
 .sent-orders li .sent-order-top .sent-order-head{flex:1;min-width:0;border-radius:var(--radius) 0 0 0}
 .sent-orders li:not(:has(.sent-order-admin)) .sent-order-head[aria-expanded=false]{border-bottom-left-radius:var(--radius)}
-.sent-orders li:not(:has(.sent-order-admin)):has(.sent-order-head[aria-expanded=false]) .sent-order-delete{border-bottom-right-radius:var(--radius)}
+.sent-orders li:not(:has(.sent-order-admin)):has(.sent-order-head[aria-expanded=false]) .sent-order-top>:last-child{border-bottom-right-radius:var(--radius)}
+/* Раскрытая заявка без полосы админа: линия под строкой заголовка, чтобы разделитель у «Скачать Excel» не упирался в таблицу */
+.sent-orders li:not(:has(.sent-order-admin)):has(.sent-order-head[aria-expanded=true]) .sent-order-top{border-bottom:var(--border-soft)}
+.sent-orders li:not(:has(.sent-order-admin)) .sent-order-lines{padding-top:var(--space-5)}
 /* Вкладка «Артикулы» у администратора */
 .articles-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-3) var(--space-5);margin:0 0 var(--space-3)}
 .articles-search{flex:1 1 260px;min-height:0;padding-block:var(--space-3);border-radius:var(--radius-pill)}
@@ -289,6 +292,13 @@ button.article-preview:hover{background:var(--tint)}
 .sent-order-status[data-cell=work]{background-color:var(--warn-bg);border-color:transparent;color:var(--warn)}
 .sent-order-status[data-cell=shipped]{background-color:var(--good-bg);border-color:transparent;color:var(--good)}
 .sent-order-status:disabled{cursor:progress}
+.sent-order-status[data-cell=work]:hover:not(:disabled){background-color:var(--warn-bg-hover)}
+.sent-order-status[data-cell=shipped]:hover:not(:disabled){background-color:var(--good-bg-hover)}
+.sent-order-status-cell{flex:none;display:flex;align-items:center;border-left:var(--border-soft)}
+/* У админа в заголовке нет метки статуса: без пустой колонки и лишнего промежутка перед линией */
+.sent-order-top:has(.sent-order-status-cell) .sent-order-head{grid-template-columns:minmax(110px,auto) 1fr auto auto}
+/* Пункты раскрытого списка — обычные, без цвета статуса */
+.sent-order-status option{background:var(--white);color:var(--ink)}
 .article-delete{width:var(--tap);height:var(--tap);display:grid;place-items:center;border:0;border-radius:var(--radius);background:none;color:var(--danger)}
 .article-delete:hover:not(:disabled),.article-delete:focus-visible{background:var(--danger-bg);color:var(--danger-dark)}
 .article-delete svg{width:var(--icon-sm);height:var(--icon-sm);fill:none;stroke:currentColor;stroke-width:var(--icon-stroke);stroke-linecap:round;stroke-linejoin:round}
@@ -398,6 +408,11 @@ button.article-preview:hover{background:var(--tint)}
 .sent-order-delete svg{width:var(--icon-sm);height:var(--icon-sm);fill:none;stroke:currentColor;stroke-width:var(--icon-stroke);stroke-linecap:round;stroke-linejoin:round}
 .sent-order-delete:hover:not(:disabled),.sent-order-delete:focus-visible{background:var(--danger-bg);color:var(--danger-dark)}
 .sent-order-delete:disabled{cursor:default;opacity:.5}
+.sent-order-download{flex:none;width:calc(var(--tap) + var(--space-4));display:grid;place-items:center;border:0;border-left:var(--border-soft);border-radius:0;background:none;color:var(--ink);padding:0;cursor:pointer}
+.sent-order-top>.sent-order-download:last-child{border-top-right-radius:var(--radius)}
+.sent-order-download svg{width:var(--icon-sm);height:var(--icon-sm);fill:none;stroke:currentColor;stroke-width:var(--icon-stroke);stroke-linecap:round;stroke-linejoin:round}
+.sent-order-download:hover:not(:disabled),.sent-order-download:focus-visible{background:var(--tint-soft)}
+.sent-order-download:disabled{cursor:progress;opacity:.5}
 .text-button--danger{color:var(--danger)}
 .text-button--danger:hover:not(:disabled){color:var(--danger-dark)}
 .bulk-block{padding:var(--space-6) var(--pad-section);border-bottom:var(--border)}
@@ -565,13 +580,17 @@ body:has(#admin-badge:not([hidden])) .site-header{padding-top:var(--space-8)}
 .import-status{min-width:0}
 .import-footer .primary-button{width:100%;min-width:0}
 .sent-order-head{grid-template-columns:1fr auto auto;padding:var(--space-4) var(--space-5)}
+.sent-order-top:has(.sent-order-status-cell) .sent-order-head{grid-template-columns:1fr auto auto}
 .sent-orders li span{grid-column:1/2;grid-row:2;font-size:var(--text-sm)}
 .sent-orders li em{grid-column:2/4;grid-row:2;justify-self:end}
 .sent-order-lines{padding:0 var(--space-3) var(--space-3)}
+.sent-orders li:not(:has(.sent-order-admin)) .sent-order-lines{padding-top:var(--space-3)}
 .sent-order-admin{padding:var(--space-1) var(--space-5)}
-.sent-order-delete{width:var(--tap)}
+.sent-order-delete,.sent-order-download{width:var(--tap)}
 .sent-order-top{flex-wrap:wrap}
 .sent-orders li .sent-order-top .sent-order-head{flex-basis:calc(100% - var(--tap))}
+.sent-order-top:has(.sent-order-delete) .sent-order-download{order:3;align-self:center;height:var(--control);width:var(--control);margin:0 0 var(--space-3) calc(-1 * var(--space-3));border:var(--border);border-radius:var(--radius-round)}
+.sent-order-status-cell{display:contents}
 .sent-order-status{order:3;margin:0 var(--space-5) var(--space-3)}
 .order-lines-table td[data-cell=code]{grid-column:1/-1}
 .order-lines-tabs{display:grid;grid-template-columns:1fr 1fr}

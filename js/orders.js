@@ -5,6 +5,7 @@ import { accessErrors, accessPassword } from './auth.js';
 import { apiUrl, loadData } from './load.js';
 import { renderDock } from './order.js';
 import { toast } from './toast.js';
+import { downloadSentOrderExcel } from './excel.js';
 import { confirmAction } from './confirm.js';
 import { forgetArticles, loadArticles } from './articles.js';
 import { forgetCategories, loadCategories } from './categories.js';
@@ -67,21 +68,26 @@ export function renderOrders(list = state.ordersList) {
       if (open) showOrderLines(entry, details);
     });
     if (!details.hidden) showOrderLines(entry, details);
+    // «Скачать Excel» и у админа корзина — в строке заголовка, рядом с суммой: раскрывать заявку не нужно.
+    // Отдельными кнопками рядом: внутри кнопки заголовка другую кнопку разместить нельзя.
+    const top = document.createElement('div');
+    top.className = 'sent-order-top';
+    top.append(head);
     if (admin) {
-      // Корзина — в строке заголовка, рядом с суммой: удаляется заявка целиком, раскрывать её не нужно.
-      // Отдельной кнопкой рядом: внутри кнопки заголовка другую кнопку разместить нельзя.
-      const top = document.createElement('div');
-      top.className = 'sent-order-top';
       const busy = busyOrders.get(entry.number) ?? '';
-      top.append(head, statusSelect(entry, { onChange: changeStatus, busy }), deleteOrderButton(entry, { onDelete: deleteOrderWithConfirm, busy }));
-      item.append(top);
+      // Статус — в своей ячейке с линией слева, как у кнопок рядом.
+      const statusCell = document.createElement('div');
+      statusCell.className = 'sent-order-status-cell';
+      statusCell.append(statusSelect(entry, { onChange: changeStatus, busy }));
+      top.append(statusCell, downloadButton(entry), deleteOrderButton(entry, { onDelete: deleteOrderWithConfirm, busy }));
     } else {
-      item.append(head);
+      top.append(downloadButton(entry));
     }
+    item.append(top);
+    item.dataset.number = entry.number;
+    head.dataset.focusKey = 'head';
     // Полоса администратора — отдельно от кнопки заголовка: в кнопке не может быть ссылок и кнопок.
     if (admin) {
-      item.dataset.number = entry.number;
-      head.dataset.focusKey = 'head';
       const bar = adminBar(entry, { onRebuild: rebuildLayouts, busy: busyOrders.get(entry.number) ?? '' });
       if (bar) item.append(bar);
     }
@@ -327,6 +333,55 @@ function renderOrderLines(lines, root, number) {
     tabs.append(tab);
   });
   root.replaceChildren(tabs, linesTable(lines.filter(line => line.company === companyTab.get(number))));
+}
+
+// «Скачать Excel» в строке заголовка — у клиента и у админа, раскрывать заявку не нужно.
+// Файл собирается в браузере из позиций заявки: все компании, по листу на каждую, как в файле менеджеру.
+// Позиции ещё не загружены — сначала загружаем их (тот же кэш, что у раскрытия).
+const downloadingOrders = new Set();
+const DOWNLOAD_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"/></svg>';
+
+function downloadButton(entry) {
+  const busy = downloadingOrders.has(entry.number);
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'sent-order-download';
+  button.dataset.focusKey = 'download';
+  button.setAttribute('aria-label', busy ? `Готовим Excel заявки ${entry.number}` : `Скачать Excel заявки ${entry.number}`);
+  button.title = busy ? 'Готовим файл…' : 'Скачать Excel';
+  button.innerHTML = DOWNLOAD_ICON;
+  button.disabled = busy;
+  button.addEventListener('click', () => downloadOrder(entry));
+  return button;
+}
+
+async function downloadOrder(entry) {
+  // Пока файл готовится, кнопка выключена и фокус уходит на заголовок; после — возвращаем его на кнопку.
+  const hadFocus = document.activeElement?.dataset.focusKey === 'download';
+  downloadingOrders.add(entry.number);
+  renderOrders();
+  try {
+    let lines = linesCache.get(entry.number);
+    if (!lines) {
+      try {
+        lines = await fetchOrderLines(entry.number);
+        linesCache.set(entry.number, lines);
+      } catch (error) {
+        console.warn(`Позиции заявки ${entry.number} не загружены:`, error);
+        toast('Не удалось загрузить позиции заявки. Попробуйте ещё раз.', { persist: true });
+        return;
+      }
+    }
+    if (!lines.length) {
+      toast('Позиций нет: заявку отправили до того, как сайт начал их сохранять. Файл есть у менеджера.', { persist: true });
+      return;
+    }
+    await downloadSentOrderExcel(entry.number, lines);
+  } finally {
+    downloadingOrders.delete(entry.number);
+    renderOrders();
+    if (hadFocus) focusOrderControl(entry.number, 'download');
+  }
 }
 
 function linesTable(lines) {

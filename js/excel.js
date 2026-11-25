@@ -25,11 +25,12 @@ export function loadExcelJs() {
 // .xlsx с рамками: по листу на каждую компанию из заявки.
 // Колонки: срочность, артикул, наименование, тираж, стоимость за штуку, итого;
 // последняя — размер, скрыта: её можно развернуть в Excel при необходимости.
-export async function buildOrderWorkbook() {
+// lines — позиции черновика или отправленной заявки (с листа «Позиции заявок»).
+export async function buildOrderWorkbook(lines = state.order) {
   const ExcelJS = await loadExcelJs();
   const book = new ExcelJS.Workbook();
-  const companies = [...new Set(state.order.map(line => line.company))];
-  companies.forEach(company => addCompanySheet(book, company, state.order.filter(line => line.company === company)));
+  const companies = [...new Set(lines.map(line => line.company))];
+  companies.forEach(company => addCompanySheet(book, company, lines.filter(line => line.company === company)));
   return book;
 }
 
@@ -51,7 +52,8 @@ export function addCompanySheet(book, company, lines) {
   lines.forEach((line, index) => {
     const row = index + 2;
     sheet.addRow({
-      urgency: urgencyLabels[line.urgency],
+      // В черновике срок — ключ (urgent), в отправленной заявке — уже текст («Срочный»).
+      urgency: urgencyLabels[line.urgency] ?? line.urgency,
       sku: line.sku,
       name: line.name,
       quantity: line.quantity,
@@ -101,16 +103,25 @@ export async function downloadExcel() {
     return;
   }
   if (orderHasProblems()) return;
+  const today = new Date();
+  const date = [today.getFullYear(), today.getMonth() + 1, today.getDate()]
+    .map(part => String(part).padStart(2, '0'))
+    .join('-');
+  await saveOrderWorkbook(state.order, `fbprint-order-${date}.xlsx`);
+}
+
+// Файл отправленной заявки: те же листы и столбцы, имя — как у файла менеджеру («FB-0042 от 09.11.2026.xlsx»).
+export function downloadSentOrderExcel(number, lines) {
+  return saveOrderWorkbook(lines, `${number.replace(/[\\/:*?"<>|]/g, ' ')}.xlsx`);
+}
+
+async function saveOrderWorkbook(lines, fileName) {
   try {
-    const book = await buildOrderWorkbook();
+    const book = await buildOrderWorkbook(lines);
     const buffer = await book.xlsx.writeBuffer();
-    const today = new Date();
-    const date = [today.getFullYear(), today.getMonth() + 1, today.getDate()]
-      .map(part => String(part).padStart(2, '0'))
-      .join('-');
     const link = document.createElement('a');
     link.href = URL.createObjectURL(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-    link.download = `fbprint-order-${date}.xlsx`;
+    link.download = fileName;
     document.body.append(link);
     link.click();
     link.remove();

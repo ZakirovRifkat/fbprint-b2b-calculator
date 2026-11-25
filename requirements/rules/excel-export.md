@@ -64,6 +64,13 @@ status: draft
 - **XLSOUT-21.** Имя файла задаёт сервер: `{номер заявки}.xlsx`, например `FB-0042 от 09.11.2026.xlsx`. Подпись в Telegram — «Excel заявки {номер}».
 - **XLSOUT-22.** Файл уходит следом за сообщением и только в чаты, которые приняли сообщение ([telegram.md](telegram.md)). Если Telegram файл не принял, заявка всё равно считается отправленной.
 
+### Файл отправленной заявки
+
+- **XLSOUT-23.** На вкладке «Заявки» у каждой заявки в строке заголовка есть «Скачать Excel» — у клиента и у админа ([sent-order-card.md](../components/sent-order-card.md), SORDER-37…40). Книга собирается в браузере из позиций, загруженных с листа «Позиции заявок», по тем же правилам XLSOUT-03…15: по листу на каждую компанию заявки, какая бы вкладка компании ни была выбрана.
+- **XLSOUT-24.** «Срок» берётся как записан на листе («Стандартный», «Срочный», «Экстренный»). Размера на листе нет — столбец G пуст. «Итого» позиции — сумма с листа.
+- **XLSOUT-25.** Имя файла — `{номер заявки}.xlsx`, как у файла менеджеру: `FB-0045 от 10.11.2026.xlsx`. Символы `\ / : * ? " < > |` заменяются пробелом.
+- **XLSOUT-26.** Проверок черновика (XLSOUT-16) нет: заявка уже отправлена. Ошибки сборки и тост «Файл Excel скачан.» — как у «Скачать Excel» в черновике.
+
 ## Примеры
 
 | Вход | Результат |
@@ -76,7 +83,8 @@ status: draft
 
 - [order-footer.md](../components/order-footer.md) — «Скачать Excel»
 - [submit-dialog.md](../components/submit-dialog.md) — файл к заявке
-- Сайт: `js/excel.js` — `loadExcelJs`, `buildOrderWorkbook`, `addCompanySheet`, `orderFileBase64`, `downloadExcel`
+- [sent-order-card.md](../components/sent-order-card.md) — «Скачать Excel» отправленной заявки
+- Сайт: `js/excel.js` — `loadExcelJs`, `buildOrderWorkbook`, `addCompanySheet`, `orderFileBase64`, `downloadExcel`, `downloadSentOrderExcel`
 - Сервер: `apps-script/Code.gs` — `orderFile`, `sendTelegram`
 
 ## При переносе

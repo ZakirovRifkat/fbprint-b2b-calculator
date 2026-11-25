@@ -37,9 +37,11 @@
   --focus:#0072a3;
   --good:#167c5a;
   --good-bg:#e9f5f0;
+  --good-bg-hover:#d3ebe0;
   --good-line:#b7dccd;
   --warn:#a85900;
   --warn-bg:#fff4df;
+  --warn-bg-hover:#ffe6b8;
   --danger:#b42318;
   --danger-dark:#8a1a12;
   --danger-bg:#fff0ed;
