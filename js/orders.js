@@ -6,6 +6,7 @@ import { apiUrl, loadData } from './load.js';
 import { renderDock } from './order.js';
 import { toast } from './toast.js';
 import { downloadSentOrderExcel } from './excel.js';
+import { refreshCustomerEmail } from './customer-email.js';
 import { confirmAction } from './confirm.js';
 import { forgetArticles, loadArticles } from './articles.js';
 import { forgetCategories, loadCategories } from './categories.js';
@@ -111,12 +112,15 @@ export function renderOrders(list = state.ordersList) {
   $('#orders-none').textContent = state.ordersFilter === 'shipped' ? 'Отгруженных заявок пока нет.' : 'Все заявки отгружены.';
   $('#orders-count').textContent = list.length;
   $('#orders-count').hidden = !list.length;
+  refreshCustomerEmail();
 }
 
 // Метка в шапке и предупреждение о Диске видны только администратору.
 function renderAdminChrome() {
   const admin = isAdmin();
   $('#admin-badge').hidden = !admin;
+  $('#customer-email').hidden = !admin;
+  if (!admin && $('#customer-email-dialog').open) $('#customer-email-dialog').close();
   // Вкладка «Артикулы» — только у администратора. Открыта, а роль клиентская — показываем расчёт.
   $('#articles-tab').hidden = !admin;
   $('#categories-tab').hidden = !admin;

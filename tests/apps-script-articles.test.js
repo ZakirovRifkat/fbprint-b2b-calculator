@@ -257,3 +257,64 @@ test('setOrderStatus: «Отгружено» и обратно, только а�
   assert.equal(h.call({ action: 'setOrderStatus', password: ADMIN, number: sent.number, shipped: false }).status, '');
   assert.equal(h.rowOf(sent.number)[4], '');
 });
+
+test('sendCustomerEmail: только администратору, номера проверяются до отправки', () => {
+  const h = loadCodeGs();
+  const sent = h.order([['Глобал Фуд', '10165']]);
+  assert.equal(h.call({ action: 'sendCustomerEmail', password: CLIENT, numbers: [sent.number] }).error.code, 'ADMIN_REQUIRED');
+  assert.equal(h.call({ action: 'sendCustomerEmail', password: ADMIN, numbers: [] }).error.code, 'EMAIL_INVALID');
+  assert.equal(h.call({ action: 'sendCustomerEmail', password: ADMIN, numbers: 'FB-0001' }).error.code, 'EMAIL_INVALID');
+  assert.equal(h.call({ action: 'sendCustomerEmail', password: ADMIN, numbers: ['nope'] }).error.code, 'EMAIL_INVALID');
+  assert.equal(h.call({ action: 'sendCustomerEmail', password: ADMIN, numbers: Array.from({ length: 51 }, (_, i) => `FB-${i}`) }).error.code, 'EMAIL_INVALID');
+  const missing = h.call({ action: 'sendCustomerEmail', password: ADMIN, numbers: [sent.number, 'FB-9999 от 01.01.2026'] });
+  assert.equal(missing.error.code, 'ORDER_NOT_FOUND');
+  assert.match(missing.error.message, /FB-9999 от 01\.01\.2026/);
+  assert.equal(h.mail.length, 0);
+});
+
+test('sendCustomerEmail: письмо на info@fb-print.ru со ссылками на папки с листа, в порядке выбора', () => {
+  const h = loadCodeGs();
+  const first = h.order([['Глобал Фуд', '10165']]);
+  const second = h.order([['Студия Вкуса', '15053']]);
+  const firstRow = h.rowOf(first.number);
+  firstRow[5] = 'https://disk.yandex.ru/d/first';
+  h.rowOf(second.number)[5] = '';
+  const reply = h.call({ action: 'sendCustomerEmail', password: ADMIN, numbers: [second.number, first.number, first.number] });
+  assert.equal(reply.ok, true);
+  assert.equal(reply.to, 'info@fb-print.ru');
+  assert.deepEqual(plain(reply.numbers), [second.number, first.number]);
+  assert.equal(h.mail.length, 1);
+  const [letter] = h.mail;
+  assert.equal(letter.to, 'info@fb-print.ru');
+  assert.equal(letter.name, 'FB-print');
+  assert.equal(letter.subject, `Согласование заявок ${second.number.split(' ')[0]}, ${first.number.split(' ')[0]}`);
+  assert.equal(letter.body, [
+    'Прошу согласовать заявки и макеты:',
+    '',
+    `1. ${second.number} — папка макетов ещё не готова`,
+    `2. ${first.number} — https://disk.yandex.ru/d/first`
+  ].join('\n'));
+  assert.match(letter.htmlBody, /<a href="https:\/\/disk\.yandex\.ru\/d\/first">макеты<\/a>/);
+  assert.match(letter.htmlBody, /^<p>Прошу согласовать заявки и макеты:<\/p><ol>/);
+});
+
+test('sendCustomerEmail: одна заявка — «заявки» в теме; HTML экранируется; лимит и сбой почты — понятная ошибка', () => {
+  const h = loadCodeGs();
+  const sent = h.order([['Глобал Фуд', '10165']]);
+  h.rowOf(sent.number)[5] = 'https://disk.yandex.ru/d/a?x=1&y="2"';
+  assert.equal(h.call({ action: 'sendCustomerEmail', password: ADMIN, numbers: [sent.number] }).ok, true);
+  assert.equal(h.mail[0].subject, `Согласование заявки ${sent.number.split(' ')[0]}`);
+  assert.match(h.mail[0].htmlBody, /href="https:\/\/disk\.yandex\.ru\/d\/a\?x=1&amp;y=&quot;2&quot;"/);
+
+  h.mailState.quota = 0;
+  const quota = h.call({ action: 'sendCustomerEmail', password: ADMIN, numbers: [sent.number] });
+  assert.equal(quota.error.code, 'EMAIL_SEND_FAILED');
+  assert.match(quota.error.message, /лимит писем/);
+
+  h.mailState.quota = 10;
+  h.mailState.fail = 'Service invoked too many times';
+  const failed = h.call({ action: 'sendCustomerEmail', password: ADMIN, numbers: [sent.number] });
+  assert.equal(failed.error.code, 'EMAIL_SEND_FAILED');
+  assert.equal(failed.error.message, 'Письмо не отправлено: Service invoked too many times');
+  assert.equal(h.mail.length, 1);
+});

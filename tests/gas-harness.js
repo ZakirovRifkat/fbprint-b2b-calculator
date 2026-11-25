@@ -367,6 +367,9 @@ export function loadCodeGs(options = {}) {
   const telegram = [];
   // status ≠ 200 — Telegram не принимает сообщения (для сценариев со сбоем отправки).
   const telegramState = { status: 200 };
+  // Письма через MailApp: quota — сколько ещё можно отправить сегодня, fail — текст ошибки отправки.
+  const mail = [];
+  const mailState = { quota: 100, fail: '' };
   const fetchLog = [];
   const sleeps = [];
   const logs = { log: [], warn: [], error: [] };
@@ -467,6 +470,14 @@ export function loadCodeGs(options = {}) {
     CacheService: {
       getScriptCache: () => ({ get: key => (cache.has(key) ? cache.get(key) : null), put: (key, value) => { cache.set(key, String(value)); }, remove: key => { cache.delete(key); } })
     },
+    MailApp: {
+      getRemainingDailyQuota: () => mailState.quota,
+      sendEmail(message) {
+        if (mailState.fail) throw new Error(mailState.fail);
+        mail.push({ ...message });
+        mailState.quota -= 1;
+      }
+    },
     UrlFetchApp: {
       fetch: (url, opts) => route(url, opts),
       fetchAll: requests => requests.map(r => route(r.url, r))
@@ -514,6 +525,8 @@ export function loadCodeGs(options = {}) {
     disk,
     telegram,
     telegramState,
+    mail,
+    mailState,
     fetchLog,
     sleeps,
     logs,

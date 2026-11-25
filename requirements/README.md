@@ -140,6 +140,7 @@ status: draft           # draft | reviewed | approved
 | [sent-order-card.md](components/sent-order-card.md) | Заявка в списке | `SORDER` |
 | [order-lines.md](components/order-lines.md) | Позиции отправленной заявки | `OLINES` |
 | [order-status-select.md](components/order-status-select.md) | Статус заявки (админ) | `OSTATUS` |
+| [customer-email-dialog.md](components/customer-email-dialog.md) | Письмо заказчику (админ) | `CEMAIL` |
 | [layout-bundle.md](components/layout-bundle.md) | Папка макетов заявки (админ) | `LBUNDLE` |
 
 **Артикулы и категории (админ)**

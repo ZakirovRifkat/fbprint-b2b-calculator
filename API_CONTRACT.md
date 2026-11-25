@@ -20,7 +20,7 @@ Content-Type: text/plain;charset=UTF-8
 ## Роли
 
 - `client` — пароль `ACCESS_PASSWORD`. Всё, что было до ролей: каталог, заявки, список заявок.
-- `admin` — пароль `ADMIN_PASSWORD`. То же, что у клиента, плюс папки макетов в списке заявок, `deleteOrder`, `rebuildLayouts`, `articleLayouts`, `layoutPreviews`, `saveArticle`, `deleteArticle`, `uploadLayout`, `setOrderStatus`, `categoryRows`, `saveCategory` и `deleteCategory`.
+- `admin` — пароль `ADMIN_PASSWORD`. То же, что у клиента, плюс папки макетов в списке заявок, `deleteOrder`, `rebuildLayouts`, `articleLayouts`, `layoutPreviews`, `saveArticle`, `deleteArticle`, `uploadLayout`, `setOrderStatus`, `sendCustomerEmail`, `categoryRows`, `saveCategory` и `deleteCategory`.
 - `ADMIN_PASSWORD`, равный `ACCESS_PASSWORD`, админом не делает: с ним входят как клиент. Не задан `ADMIN_PASSWORD` — администратора нет.
 - Ответы `catalog` и `orders` несут `"role": "client" | "admin"`. Сайт роль не хранит, хранит только пароль; скрипт определяет роль по паролю заново на каждом запросе.
 - Действие администратора с паролем клиента получает `ADMIN_REQUIRED`. Это не выход: сайт переключается в роль клиента и не спрашивает пароль снова.
@@ -159,7 +159,7 @@ Apps Script не умеет менять HTTP-статус, поэтому ош�
 | `ACCESS_NOT_CONFIGURED` | в свойствах скрипта не задан ни `ACCESS_PASSWORD`, ни `ADMIN_PASSWORD` |
 | `ADMIN_REQUIRED` | действие администратора с паролем клиента: «Это действие доступно только администратору» |
 | `INVALID_REQUEST` | тело запроса не JSON |
-| `UNKNOWN_ACTION` | `action` не равен `catalog`, `order`, `orders`, `orderLines`, `deleteOrder`, `rebuildLayouts`, `articleLayouts`, `layoutPreviews`, `saveArticle`, `deleteArticle`, `uploadLayout`, `setOrderStatus`, `categoryRows`, `saveCategory` или `deleteCategory` |
+| `UNKNOWN_ACTION` | `action` не равен `catalog`, `order`, `orders`, `orderLines`, `deleteOrder`, `rebuildLayouts`, `articleLayouts`, `layoutPreviews`, `saveArticle`, `deleteArticle`, `uploadLayout`, `setOrderStatus`, `sendCustomerEmail`, `categoryRows`, `saveCategory` или `deleteCategory` |
 | `CATALOG_READ_FAILED` | лист не найден, нет доступа или другая ошибка чтения |
 | `INVALID_ORDER_NUMBER` | `deleteOrder`, `rebuildLayouts`: номер не начинается с `FB-` и цифр |
 | `ORDER_NOT_FOUND` | `deleteOrder`, `rebuildLayouts`: такой заявки нет на листе «Заявки» |
@@ -177,6 +177,8 @@ Apps Script не умеет менять HTTP-статус, поэтому ош�
 | `LAYOUT_UPLOAD_INVALID` | `uploadLayout`: не JPG/PNG/PDF, пустой файл или больше 20 МБ |
 | `LAYOUT_UPLOAD_FAILED` | `uploadLayout`: Яндекс Диск не принял файл |
 | `ORDER_STATUS_FAILED` | `setOrderStatus`: не удалось записать статус |
+| `EMAIL_INVALID` | `sendCustomerEmail`: нет номеров, больше 50 или номер не начинается с `FB-` и цифр |
+| `EMAIL_SEND_FAILED` | `sendCustomerEmail`: лимит писем на сегодня исчерпан, почта не приняла письмо или лист не прочитался |
 | `LAYOUT_PREVIEW_FAILED` | `layoutPreviews`: Яндекс Диск не отдал превью (например, не принял токен) |
 | `LAYOUTS_QUEUE_FAILED` | `rebuildLayouts`: не удалось записать статус на лист |
 
@@ -407,6 +409,19 @@ Content-Type: text/plain;charset=UTF-8
 
 - `shipped: true` пишет «Отгружено» в колонку E самой нижней строки с этим номером, `false` — очищает её («В работе»).
 - Успех: `{ "ok": true, "number": "…", "status": "shipped" }` или `"status": ""`. Ошибки: `ADMIN_REQUIRED`, `INVALID_ORDER_NUMBER`, `ORDER_NOT_FOUND`, `ORDER_STATUS_FAILED`.
+
+## Письмо заказчику
+
+Только администратор.
+
+```json
+{ "action": "sendCustomerEmail", "password": "…", "numbers": ["FB-0045 от 10.11.2026", "FB-0043 от 09.11.2026"] }
+```
+
+- От 1 до 50 номеров, повторы убираются. Для каждого номера берётся самая нижняя строка «Заявок»; ссылка на папку макетов — из колонки F, а не из запроса.
+- Письмо уходит через `MailApp` с Google-аккаунта владельца скрипта на `info@fb-print.ru` (константа `CUSTOMER_EMAIL_TO`), имя отправителя «FB-print». Нужно право `script.send_mail`.
+- Тема: «Согласование заявок FB-0045, FB-0043» (одна заявка — «Согласование заявки FB-0045»). Текст: «Прошу согласовать заявки и макеты:», пустая строка, затем `1. {номер} — {ссылка}` в порядке запроса. Нет ссылки — «папка макетов ещё не готова». В HTML-версии ссылка — слово «макеты».
+- Успех: `{ "ok": true, "to": "info@fb-print.ru", "numbers": ["…"] }`. Ошибки: `ADMIN_REQUIRED`, `EMAIL_INVALID`, `ORDER_NOT_FOUND` (называет ненайденные номера), `EMAIL_SEND_FAILED`.
 
 ## Категории
 

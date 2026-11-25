@@ -15,6 +15,7 @@ import { openOrderDialog, orderSending, submitOrder } from './submit.js';
 import { downloadExcel } from './excel.js';
 import { hideToast, restartToastTimer, toast } from './toast.js';
 import { initConfirm } from './confirm.js';
+import { initCustomerEmail } from './customer-email.js';
 import { initVersionCheck } from './version.js';
 
 // Раньше заявки хранились в браузере; теперь они в таблице, старую копию убираем.
@@ -258,6 +259,7 @@ window.addEventListener('hashchange', () => {
 initArticles({ onCatalogChange: loadData });
 initCategories({ onCatalogChange: loadData });
 initVersionCheck();
+initCustomerEmail();
 document.querySelectorAll('#orders-toolbar .orders-filter button').forEach(button => button.addEventListener('click', () => {
   state.ordersFilter = button.dataset.filter;
   renderOrders();

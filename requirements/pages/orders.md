@@ -23,7 +23,7 @@ status: draft
 
 ## Состав
 
-1. Заголовок `h1` «Заявки» и подзаголовок.
+1. Заголовок `h1` «Заявки» и подзаголовок. Справа от заголовка у админа — кнопка «Создать письмо заказчику» ([customer-email-dialog.md](../components/customer-email-dialog.md)).
 2. [orders-toolbar.md](../components/orders-toolbar.md) — фильтр «Все / В работе / Отгружены» со счётчиками и время обновления.
 3. Предупреждение о Яндекс Диске (только админ) — см. [layout-bundle.md](../components/layout-bundle.md), `LBUNDLE-14`.
 4. Сообщение «ничего не найдено» для фильтра ([ui-empty-state.md](../components/ui-empty-state.md)).

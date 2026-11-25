@@ -6,6 +6,7 @@
  * POST {action: 'orderLines', password, number} — позиции одной заявки с листа «Позиции заявок».
  * POST {action: 'deleteOrder', password, number} — удаляет заявку и её позиции (только администратор).
  * POST {action: 'rebuildLayouts', password, number} — заново собирает папку макетов заявки (только администратор).
+ * POST {action: 'sendCustomerEmail', password, numbers} — письмо заказчику со ссылками на папки макетов (только администратор).
  * Без верного пароля не отдаёт ничего. Расчёт — в js/pricing.js.
  * Пишет только на листы «Заявки» и «Позиции заявок»; на листах артикулов — только колонку H «Макет»
  * и только функциями setupLayoutColumn и fillLayoutColumn, которые запускают в редакторе.
@@ -162,6 +163,7 @@ function doPost(e) {
   if (order.action === 'deleteArticle') return json(deleteArticleReply(order, role));
   if (order.action === 'uploadLayout') return json(uploadLayoutReply(order, role));
   if (order.action === 'setOrderStatus') return json(setOrderStatusReply(order, role));
+  if (order.action === 'sendCustomerEmail') return json(sendCustomerEmailReply(order, role));
   if (order.action === 'categoryRows') return json(categoryRowsReply(role));
   if (order.action === 'saveCategory') return json(saveCategoryReply(order, role));
   if (order.action === 'deleteCategory') return json(deleteCategoryReply(order, role));
@@ -2294,6 +2296,76 @@ function setOrderStatusReply(request, role) {
     return articleError('ORDER_STATUS_FAILED', `Не удалось сменить статус заявки: ${error.message}`);
   } finally {
     lock.releaseLock();
+  }
+}
+
+// ───── Письмо заказчику ─────
+
+// Пока письмо уходит только сюда. Тот же адрес назван в окне на сайте (js/customer-email.js).
+const CUSTOMER_EMAIL_TO = 'info@fb-print.ru';
+const CUSTOMER_EMAIL_MAX = 50;
+const CUSTOMER_EMAIL_INTRO = 'Прошу согласовать заявки и макеты:';
+const CUSTOMER_EMAIL_NO_FOLDER = 'папка макетов ещё не готова';
+
+function htmlText(value) {
+  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Письмо из заявок [{ number, url }] в порядке выбора. Ссылка — папка макетов заявки на Яндекс Диске.
+// Без ссылки — пометка, что папка не готова. Тема — короткие номера: «Согласование заявок FB-0045, FB-0044».
+function customerEmail(orders) {
+  const short = orders.map(order => order.number.split(' ')[0]);
+  const subject = `Согласование ${orders.length === 1 ? 'заявки' : 'заявок'} ${short.join(', ')}`;
+  const body = [CUSTOMER_EMAIL_INTRO, '']
+    .concat(orders.map((order, index) => `${index + 1}. ${order.number} — ${order.url || CUSTOMER_EMAIL_NO_FOLDER}`))
+    .join('\n');
+  const items = orders.map(order => `<li>${htmlText(order.number)} — ${order.url
+    ? `<a href="${htmlText(order.url)}">макеты</a>`
+    : htmlText(CUSTOMER_EMAIL_NO_FOLDER)}</li>`).join('');
+  const htmlBody = `<p>${htmlText(CUSTOMER_EMAIL_INTRO)}</p><ol>${items}</ol>`;
+  return { subject, body, htmlBody };
+}
+
+// sendCustomerEmail: { numbers: ['FB-0045 от 10.11.2026', …] }. Только администратору.
+// Ссылки на папки берутся с листа «Заявки» (колонка F), а не из запроса.
+function sendCustomerEmailReply(request, role) {
+  if (role !== 'admin') return { error: ADMIN_REQUIRED };
+  const numbers = Array.isArray(request.numbers)
+    ? [...new Set(request.numbers.map(number => field(number, 40)))]
+    : [];
+  if (!numbers.length || numbers.length > CUSTOMER_EMAIL_MAX || numbers.some(number => !/^FB-\d+/.test(number))) {
+    return articleError('EMAIL_INVALID', `Выберите от 1 до ${CUSTOMER_EMAIL_MAX} заявок`);
+  }
+  let orders;
+  try {
+    const sheet = ordersSheet();
+    const last = sheet.getLastRow();
+    const values = last < 2 ? [] : sheet.getRange(2, 1, last - 1, 6).getValues();
+    orders = numbers.map(number => {
+      // Как у статуса и удаления: самая нижняя строка с этим номером.
+      for (let index = values.length - 1; index >= 0; index--) {
+        if (text(values[index][0]) === number) return { number, url: text(values[index][5] ?? '') };
+      }
+      return null;
+    });
+  } catch (error) {
+    console.error(error);
+    return articleError('EMAIL_SEND_FAILED', `Не удалось прочитать заявки: ${error.message}`);
+  }
+  const missing = numbers.filter((number, index) => !orders[index]);
+  if (missing.length) {
+    return { error: { code: 'ORDER_NOT_FOUND', message: `Заявки не найдены — возможно, их уже удалили: ${missing.join(', ')}` } };
+  }
+  try {
+    if (MailApp.getRemainingDailyQuota() < 1) {
+      return articleError('EMAIL_SEND_FAILED', 'На сегодня лимит писем исчерпан. Попробуйте завтра');
+    }
+    const letter = customerEmail(orders);
+    MailApp.sendEmail({ to: CUSTOMER_EMAIL_TO, subject: letter.subject, body: letter.body, htmlBody: letter.htmlBody, name: 'FB-print' });
+    return { ok: true, to: CUSTOMER_EMAIL_TO, numbers };
+  } catch (error) {
+    console.error(error);
+    return articleError('EMAIL_SEND_FAILED', `Письмо не отправлено: ${error.message}`);
   }
 }
 

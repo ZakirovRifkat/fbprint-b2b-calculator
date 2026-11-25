@@ -8,9 +8,9 @@
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
   <!-- Версии файлов: node tools/stamp-version.mjs. Не правьте руками. -->
-  <meta name="app-version" content="6da74e73f2">
+  <meta name="app-version" content="96c72f3608">
   <link rel="stylesheet" href="tokens.css?v=deb5f92ab7">
-  <link rel="stylesheet" href="style.css?v=8b8d14325c">
+  <link rel="stylesheet" href="style.css?v=30f87d7eb4">
   <script type="importmap">
   {
     "imports": {
@@ -21,12 +21,13 @@
       "./js/catalog.js": "./js/catalog.js?v=2f269e5fe8",
       "./js/categories.js": "./js/categories.js?v=7b4139aa07",
       "./js/confirm.js": "./js/confirm.js?v=eae6c4b86c",
+      "./js/customer-email.js": "./js/customer-email.js?v=851301f9bd",
       "./js/excel.js": "./js/excel.js?v=4193e21ba8",
       "./js/format.js": "./js/format.js?v=1cbee78a2f",
       "./js/import.js": "./js/import.js?v=cfc2ae589f",
       "./js/load.js": "./js/load.js?v=b29ca97e3c",
       "./js/order.js": "./js/order.js?v=43bf628433",
-      "./js/orders.js": "./js/orders.js?v=86d8c2f4bd",
+      "./js/orders.js": "./js/orders.js?v=94d3284fc0",
       "./js/pricing.js": "./js/pricing.js?v=8d98cefcd9",
       "./js/state.js": "./js/state.js?v=bae9cf03f1",
       "./js/submit.js": "./js/submit.js?v=90b030e5f3",
@@ -288,7 +289,14 @@
   <!-- Вкладка «Заявки»: заявки из таблицы (лист «Заявки»), новые сверху. -->
   <main class="orders-view" id="orders-view" aria-labelledby="orders-title" hidden>
     <div class="orders-head">
-      <h1 id="orders-title" tabindex="-1">Заявки</h1>
+      <div class="articles-title-row">
+        <h1 id="orders-title" tabindex="-1">Заявки</h1>
+        <!-- Только для администратора. -->
+        <button class="primary-button add-article" id="customer-email" type="button" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4zM4 7l8 6 8-6"/></svg>
+          Создать письмо заказчику
+        </button>
+      </div>
       <p>Все заявки, отправленные с калькулятора. Статус «Отгружено» ставит менеджер FB-print.</p>
     </div>
     <div class="orders-toolbar" id="orders-toolbar" hidden>
@@ -543,6 +551,29 @@
   </dialog>
 
   <!-- Подтверждение удаления. Открывается поверх других окон; Esc и «Отмена» ничего не удаляют. -->
+  <!-- Письмо заказчику: администратор отмечает заявки, письмо со ссылками на папки макетов уходит на почту. -->
+  <dialog id="customer-email-dialog" class="article-dialog" aria-labelledby="customer-email-title" aria-describedby="customer-email-note">
+    <form id="customer-email-form" novalidate>
+      <button class="dialog-close" id="close-customer-email" type="button" aria-label="Закрыть">×</button>
+      <div class="dialog-step">
+        <h2 id="customer-email-title">Письмо заказчику</h2>
+        <p class="email-note" id="customer-email-note"></p>
+        <div class="email-orders-bar">
+          <span id="customer-email-count" aria-live="polite"></span>
+          <button class="text-button" id="customer-email-all" type="button"></button>
+        </div>
+        <ul class="email-orders" id="customer-email-list" aria-label="Заявки"></ul>
+        <p class="dialog-error" id="customer-email-error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button class="secondary-button" id="customer-email-cancel" type="button">Отмена</button>
+          <button class="primary-button primary-button--accent login-submit" id="customer-email-send" type="submit">
+            <span class="button-spinner" aria-hidden="true"></span><span id="customer-email-send-label">Отправить письмо</span>
+          </button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-message">
     <form method="dialog">
       <div class="dialog-step">
@@ -588,6 +619,6 @@
     <button class="toast-close" id="toast-close" type="button" aria-label="Закрыть уведомление" hidden>×</button>
   </div>
   <script src="config.js?v=d8de7b46b9"></script>
-  <script type="module" src="js/main.js?v=38896cfb35"></script>
+  <script type="module" src="js/main.js?v=f52f4a7721"></script>
 </body>
 </html>
