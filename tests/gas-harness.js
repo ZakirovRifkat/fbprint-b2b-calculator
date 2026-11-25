@@ -204,7 +204,8 @@ export const DISK_ROOT = 'disk:/ФБ-ПРИНТ/ГлобалФуд_Студия�
 export const DISK_ORDERS = 'disk:/ФБ-ПРИНТ/Макеты_по_заявкам';
 const API = 'https://cloud-api.yandex.net/v1/disk';
 export const PREVIEW_HOST = 'https://downloader.disk.yandex.ru';
-export const UPLOAD_HOST = 'https://uploader1.disk.yandex.net';
+// Как у настоящего Диска — с портом в адресе загрузки.
+export const UPLOAD_HOST = 'https://uploader1.disk.yandex.net:443';
 
 const resp = (code, body) => ({
   getResponseCode: () => code,

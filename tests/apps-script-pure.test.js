@@ -186,3 +186,14 @@ test('layoutsMessage: готово, не все, пусто, ошибка, дл�
 test('tokenMessage говорит о YANDEX_DISK_TOKEN', () => {
   assert.match(c.tokenMessage(), /YANDEX_DISK_TOKEN/);
 });
+
+test('isDiskUploadUrl: адрес Яндекса с портом :443 и без него — да, чужой и другой порт — нет', () => {
+  assert.equal(c.isDiskUploadUrl('https://uploader1d.dst.yandex.net:443/upload-target/20261125T1/abc'), true);
+  assert.equal(c.isDiskUploadUrl('https://uploader1.disk.yandex.net/upload/x'), true);
+  assert.equal(c.isDiskUploadUrl('https://uploader.yandex.ru:443/upload/x'), true);
+  assert.equal(c.isDiskUploadUrl('https://uploader.yandex.net:8080/upload/x'), false);
+  assert.equal(c.isDiskUploadUrl('https://yandex.net.evil.com/upload/x'), false);
+  assert.equal(c.isDiskUploadUrl('https://evil.com/?yandex.net/'), false);
+  assert.equal(c.isDiskUploadUrl('http://uploader.yandex.net/upload/x'), false);
+  assert.equal(c.isDiskUploadUrl(''), false);
+});

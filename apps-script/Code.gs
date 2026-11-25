@@ -2329,8 +2329,9 @@ function layoutFileName(prefix, sku, size, ext, takenNames) {
 }
 
 // Адрес загрузки Диска: токен туда не отправляется, но чужой адрес мы и файл не отдаём.
+// Яндекс отдаёт его с портом: «https://uploader1d.dst.yandex.net:443/upload-target/…».
 function isDiskUploadUrl(url) {
-  return /^https:\/\/([a-z0-9-]+\.)*(yandex\.ru|yandex\.net)\//.test(String(url || ''));
+  return /^https:\/\/([a-z0-9-]+\.)*(yandex\.ru|yandex\.net)(:443)?\//.test(String(url || ''));
 }
 
 // Кладёт байты в path: запрос адреса загрузки, затем PUT на него. Ошибка — DiskError.
