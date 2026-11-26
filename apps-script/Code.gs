@@ -30,7 +30,8 @@ const MAX_LINES = 300; // клиенты загружают свои табли�
 const TELEGRAM_TEXT_LIMIT = 4000; // Telegram принимает до 4096 символов в сообщении
 const ORDERS_SHEET = 'Заявки';
 const LINES_SHEET = 'Позиции заявок';
-const LINES_HEADER = ['Номер заявки', 'Компания', 'Артикул', 'Название', 'Тираж', 'Срок', 'Цена за шт.', 'Сумма', 'Примечание'];
+// «Размер» (J) — размер этикетки из каталога на момент заявки; на сайте не показывается, нужен таблице заявки.
+const LINES_HEADER = ['Номер заявки', 'Компания', 'Артикул', 'Название', 'Тираж', 'Срок', 'Цена за шт.', 'Сумма', 'Примечание', 'Размер'];
 const SHIPPED = 'Отгружено';
 const TIME_ZONE = 'Europe/Moscow';
 const URGENCIES = ['Стандартный', 'Срочный', 'Экстренный'];
@@ -192,7 +193,7 @@ function doPost(e) {
     // Позиции — для подробностей заявки на сайте. Не записались — заявка всё равно уходит менеджеру:
     // все позиции есть в сообщении и в Excel.
     try {
-      writeOrderLines(order);
+      writeOrderLines(order, check.sizes);
     } catch (error) {
       console.error(`Позиции заявки ${order.number} не записаны: ${error.message}`);
     }
@@ -297,17 +298,30 @@ function verifyPrices(order) {
     catalog = readCatalog();
   } catch (error) {
     console.error(error);
-    return { error: `Цены не проверены: ${error.message}`, warnings: order.lines.map(() => ''), totalWarning: '' };
+    return { error: `Цены не проверены: ${error.message}`, warnings: order.lines.map(() => ''), totalWarning: '', sizes: order.lines.map(() => '') };
   }
   const companyIds = new Map(catalog.companies.map(company => [company.name, company.id]));
   const categories = new Map(catalog.categories.map(category => [category.id, category]));
   const warnings = order.lines.map(line => lineWarnings(line, catalog.articles, companyIds, categories));
+  const sizeOf = catalogSizeLookup(catalog);
+  const sizes = order.lines.map(line => sizeOf(line.company, line.sku));
 
   const linesTotal = roundMoney(order.lines.reduce((sum, line) => sum + Number(line.total), 0));
   const totalWarning = Math.abs(linesTotal - roundMoney(Number(order.total))) > 0.005
     ? `⚠ «Итого» не равно сумме позиций: по позициям ${moneyText(linesTotal)}`
     : '';
-  return { error: null, warnings, totalWarning };
+  return { error: null, warnings, totalWarning, sizes };
+}
+
+// (название компании, артикул) → размер этикетки из каталога; нет артикула или категории — ''.
+function catalogSizeLookup(catalog) {
+  const companyIds = new Map(catalog.companies.map(company => [company.name, company.id]));
+  const sizes = new Map(catalog.categories.map(category => [category.id, category.size]));
+  return (company, sku) => {
+    const companyId = companyIds.get(field(company, 100));
+    const article = catalog.articles.find(item => item.companyId === companyId && item.sku === field(sku, 50));
+    return (article && sizes.get(article.categoryId)) || '';
+  };
 }
 
 function lineWarnings(line, articles, companyIds, categories) {
@@ -636,8 +650,9 @@ function deleteOrder(number) {
 
 // Лист «Позиции заявок»: одна строка — одна позиция, первая колонка — номер заявки с листа «Заявки».
 // Позиции одной заявки пишутся одним блоком. Лист создаётся сам при первой заявке.
-function writeOrderLines(order) {
-  const values = order.lines.map(line => [
+// sizes — размер каждой позиции из каталога (verifyPrices), по порядку позиций.
+function writeOrderLines(order, sizes = []) {
+  const values = order.lines.map((line, index) => [
     order.number,
     cellText(field(line.company, 100)),
     cellText(field(line.sku, 40)),
@@ -646,12 +661,17 @@ function writeOrderLines(order) {
     field(line.urgency, 20),
     Number(line.unitPrice),
     Number(line.total),
-    cellText(field(line.condition, 100))
+    cellText(field(line.condition, 100)),
+    cellText(field(sizes[index], 60))
   ]);
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
     const sheet = linesSheet();
+    // Лист создан до колонки «Размер» — дописываем заголовок J1.
+    if (!text(sheet.getRange(1, LINES_HEADER.length).getValue() ?? '')) {
+      sheet.getRange(1, LINES_HEADER.length).setValue(LINES_HEADER[LINES_HEADER.length - 1]).setFontWeight('bold');
+    }
     sheet.getRange(sheet.getLastRow() + 1, 1, values.length, LINES_HEADER.length).setValues(values);
     SpreadsheetApp.flush();
   } finally {
@@ -690,11 +710,12 @@ function linesSheet() {
 }
 
 // Позиции одной заявки в том порядке, в каком их отправил клиент. Нет листа — позиций нет.
+// size — из колонки J; у заявок, отправленных до этой колонки, — из текущего каталога.
 function readOrderLines(number) {
   if (!/^FB-\d+/.test(number)) return [];
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(LINES_SHEET);
   if (!sheet) return [];
-  return sheet.getDataRange().getValues().slice(1)
+  const lines = sheet.getDataRange().getValues().slice(1)
     .filter(row => text(row[0]) === number)
     .map(row => ({
       company: text(row[1]),
@@ -704,8 +725,18 @@ function readOrderLines(number) {
       urgency: text(row[5]),
       unitPrice: toNumber(row[6]) || 0,
       total: toNumber(row[7]) || 0,
-      condition: text(row[8])
+      condition: text(row[8]),
+      size: text(row[9] ?? '')
     }));
+  if (lines.some(line => !line.size)) {
+    try {
+      const sizeOf = catalogSizeLookup(readCatalog());
+      lines.forEach(line => { if (!line.size) line.size = sizeOf(line.company, line.sku); });
+    } catch (error) {
+      console.warn(`Размеры позиций заявки ${number} не найдены в каталоге: ${error.message}`);
+    }
+  }
+  return lines;
 }
 
 function ordersSheet() {

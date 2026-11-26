@@ -552,3 +552,18 @@ test('fillLayoutColumn без токена — только заголовок, 
   assert.equal(h.ctx.fillLayoutColumn(), null);
   assert.equal(h.disk.requests.length, 0);
 });
+
+test('orderLines: размер из каталога пишется в колонку J и приходит с позициями; у старых заявок — из каталога', () => {
+  const h = loadCodeGs();
+  const sent = h.order([['Глобал Фуд', '10165'], ['Студия Вкуса', '20001']]);
+  assert.equal(h.sheets['Позиции заявок'].data[0][9], 'Размер');
+  assert.deepEqual(h.lineRows().map(row => row[9]), ['80x120', '80x120']);
+  const lines = h.call({ action: 'orderLines', password: CLIENT, number: sent.number }).lines;
+  assert.deepEqual(lines.map(line => line.size), ['80x120', '80x120']);
+
+  // Заявка, записанная до колонки «Размер»: J пуста — размер из каталога; артикула в каталоге нет — пусто.
+  h.lineRows().forEach(row => { row[9] = ''; });
+  h.lineRows()[1][2] = '99999';
+  const old = h.call({ action: 'orderLines', password: CLIENT, number: sent.number }).lines;
+  assert.deepEqual(old.map(line => line.size), ['80x120', '']);
+});
